@@ -667,7 +667,6 @@
   .paid-campaign.is-open .paid-campaign-body { animation: fadeUp 0.3s ease both; }
   .campaign-block-head      { margin-bottom: 16px; }
   .campaign-block-title     { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; }
-  .campaign-block-sub       { max-width: 64ch; margin: 6px 0 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
   .campaign-ads             { margin-top: 34px; }
   .campaign-ads .campaign-block-title { margin-bottom: 14px; }
   .campaign-audience        { margin-top: 38px; }
@@ -1719,9 +1718,6 @@
 }
 
 /* ═══ Paid Media — Audience (LinkedIn demographics) ══════════════ */
-.section-sub {
-  max-width: 62ch; margin: 10px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-3);
-}
 .aud-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 56px; }
 .aud-panel  { min-width: 0; }
 .aud-panel-head {

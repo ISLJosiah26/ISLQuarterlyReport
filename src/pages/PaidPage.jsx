@@ -345,12 +345,11 @@ function AudiencePanel({ panel }) {
   );
 }
 
-function AudienceBlock({ panels, title, blurb }) {
+function AudienceBlock({ panels, title }) {
   return (
     <div className="campaign-audience">
       <div className="campaign-block-head">
         <h3 className="campaign-block-title serif">{title}</h3>
-        <p className="campaign-block-sub">{blurb}</p>
       </div>
       <div className="aud-panels">
         {panels.map(panel => <AudiencePanel key={panel.dimension} panel={panel} />)}
@@ -506,11 +505,7 @@ function Campaign({ c, index, open, onToggle }) {
             )}
 
             {c.audience.length > 0 && (
-              <AudienceBlock
-                panels={c.audience}
-                title="Who this campaign reached"
-                blurb="From LinkedIn. Bars compare segments within a breakdown; the percentage beside them is the true share of this campaign’s impressions, and the meter at the right is how strongly that segment clicked."
-              />
+              <AudienceBlock panels={c.audience} title="Who this campaign reached" />
             )}
           </>
         )}
@@ -631,11 +626,7 @@ export function PaidPage({ agency, quarter, onReady }) {
                 <header className="section-head">
                   <h2 className="section-title serif">Who We <em>Reached</em></h2>
                 </header>
-                <AudienceBlock
-                  panels={data.audience}
-                  title="Across all campaigns"
-                  blurb="An account-wide breakdown from LinkedIn. Bars compare segments within a breakdown; the percentage beside them is the true share of impressions, and the meter at the right is how strongly that segment clicked."
-                />
+                <AudienceBlock panels={data.audience} title="Across all campaigns" />
               </section>
             </ErrorBoundary>
           )}
