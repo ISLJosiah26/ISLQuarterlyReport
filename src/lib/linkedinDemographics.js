@@ -49,9 +49,13 @@ const otherLabel = (n) => `Other (${n.toLocaleString()} more)`;
 //
 // This orders the stored rows, so it also decides which segments survive the
 // MAX_SEGMENTS cut — the clickers are kept, not just the most-served.
+//
+// Exported because the report sorts with it too. Ranking only at import time
+// would freeze whatever rule was in force the day a file was uploaded, so a
+// change here would silently skip every breakdown already in the database.
 const RANK_BY_CLICKS = new Set(["company"]);
 
-function compareSegments(dimension) {
+export function compareSegments(dimension) {
   if (!RANK_BY_CLICKS.has(dimension)) return (a, b) => b.impressions - a.impressions;
   return (a, b) => (b.clicks || 0) - (a.clicks || 0) || b.impressions - a.impressions;
 }

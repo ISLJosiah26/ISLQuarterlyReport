@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase.js";
 import { AGENCIES, QUARTERS } from "../config.js";
 import { calcAutoDelta, sumPaidMediaAds, nfk } from "../utils.js";
 import { withRetry, friendlyError, getCached, setCached } from "../lib/fetching.js";
-import { AUDIENCE_DIMENSIONS } from "../lib/linkedinDemographics.js";
+import { AUDIENCE_DIMENSIONS, compareSegments } from "../lib/linkedinDemographics.js";
 
 function getQuarterMeta(suffix) {
   return QUARTERS.find(q => q.suffix === suffix) || QUARTERS[0];
@@ -29,10 +29,12 @@ async function fetchPaid(agency, quarter) {
 }
 
 // Group demographic rows into per-dimension panels, in the canonical dimension
-// order. Segments keep their stored order (which the importer writes strongest
-// first, and which parks the combined "Other" row at the end), each carrying
-// its CTR and share of the dimension's impressions so the report can show both
-// who saw the ads and who responded.
+// order. Segments are ranked here rather than trusted to arrive in order —
+// the importer writes the same ranking into sort_order, but breakdowns
+// uploaded under an older rule would otherwise keep it forever. sort_order
+// only breaks ties, so hand-edited rows still land somewhere stable. Each
+// segment carries its CTR and share of the dimension's impressions so the
+// report can show both who saw the ads and who responded.
 function rollUpAudience(rawRows) {
   const byDimension = new Map();
   for (const r of rawRows || []) {
@@ -43,7 +45,9 @@ function rollUpAudience(rawRows) {
   return AUDIENCE_DIMENSIONS
     .filter(d => byDimension.has(d.key))
     .map(d => {
-      const rows = [...byDimension.get(d.key)].sort((a, b) => a.sort_order - b.sort_order);
+      const rank = compareSegments(d.key);
+      const rows = [...byDimension.get(d.key)]
+        .sort((a, b) => rank(a, b) || a.sort_order - b.sort_order);
       const total = rows.reduce((a, r) => a + r.impressions, 0);
       const segments = rows.map(r => ({
         name: r.segment,
