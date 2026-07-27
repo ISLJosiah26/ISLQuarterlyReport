@@ -34,7 +34,7 @@ function nowTimeStr() {
 }
 const BLANK_INSIGHTS = { working: "", not_working: "", actions: "", next_quarter: "" };
 
-const newAd       = () => ({ id: crypto.randomUUID(), name: "", impressions: "", reach: "", clicks: "", cpc: "", engagement_rate: "", status: "active" });
+const newAd       = () => ({ id: crypto.randomUUID(), name: "", impressions: "", reach: "", clicks: "", cpc: "", conversions: "", engagement_rate: "", status: "active" });
 const newCampaign = () => ({ id: crypto.randomUUID(), name: "", objective: "", platform: "", budget: "", start_date: "", end_date: "", ads: [] });
 const AD_STATUSES = ["active", "paused", "completed", "draft"];
 const PAID_PLATFORM_OPTIONS = ["LinkedIn", "Facebook", "Instagram", "Google", "TikTok", "YouTube"];
@@ -280,7 +280,7 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
             budget: str(c.budget), start_date: c.start_date || "", end_date: c.end_date || "",
             ads: [...(c.paid_media_ads || [])].sort((a, b) => a.sort_order - b.sort_order).map(a => ({
               id: a.id, name: a.name || "", impressions: str(a.impressions), reach: str(a.reach), clicks: str(a.clicks),
-              cpc: str(a.cpc), engagement_rate: str(a.engagement_rate), status: a.status || "active",
+              cpc: str(a.cpc), conversions: str(a.conversions), engagement_rate: str(a.engagement_rate), status: a.status || "active",
             })),
           })));
         }
@@ -391,7 +391,8 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
         const ads = campaigns.flatMap(c => c.ads.map((a, j) => ({
           id: a.id, campaign_id: c.id, sort_order: j, name: a.name,
           impressions: num(a.impressions), reach: num(a.reach), clicks: num(a.clicks),
-          cpc: num(a.cpc), engagement_rate: num(a.engagement_rate), status: a.status || "active",
+          cpc: num(a.cpc), conversions: num(a.conversions),
+          engagement_rate: num(a.engagement_rate), status: a.status || "active",
         })));
         if (ads.length) await dbOp(supabase.from("paid_media_ads").insert(ads));
       }
@@ -694,6 +695,10 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
                     <Field label="CPC ($)">
                       <input type="number" step="0.01" className="admin-input" value={a.cpc}
                         onChange={e => { setCampaigns(cs => cs.map((x, j) => j === ci ? { ...x, ads: x.ads.map((y, k) => k === ai ? { ...y, cpc: e.target.value } : y) } : x)); dirty(); }} />
+                    </Field>
+                    <Field label="Conversions">
+                      <input type="number" className="admin-input" value={a.conversions}
+                        onChange={e => { setCampaigns(cs => cs.map((x, j) => j === ci ? { ...x, ads: x.ads.map((y, k) => k === ai ? { ...y, conversions: e.target.value } : y) } : x)); dirty(); }} />
                     </Field>
                     <Field label="Engagement Rate (%)">
                       <input type="number" step="0.01" className="admin-input" value={a.engagement_rate}

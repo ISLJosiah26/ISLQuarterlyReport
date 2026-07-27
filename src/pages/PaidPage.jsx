@@ -92,19 +92,22 @@ function Hero({ data }) {
 
 // ─── Campaign metrics ─────────────────────────────────────────────
 // Every figure a campaign can show. Cost metrics invert their delta colour —
-// a falling CPC is a win. Conversions, conversion rate and cost-per-conversion
-// used to sit here; the ad platforms don't report them back, so they're gone
-// rather than permanently blank.
+// a falling CPC is a win. The conversion family sits at the end and is off by
+// default: the platforms don't always report conversions back, so those tiles
+// read as an em dash until a campaign has the numbers to fill them.
 const CAMPAIGN_METRICS = [
-  { key: "spend",          label: "Spend",       fmt: money0,   note: "invested" },
-  { key: "impressions",    label: "Impressions", fmt: fmt,      note: "ad views served" },
-  { key: "reach",          label: "Reach",       fmt: fmt,      note: "unique people reached" },
-  { key: "clicks",         label: "Clicks",      fmt: fmtExact, note: "link + action clicks" },
-  { key: "ctr",            label: "CTR",         fmt: pct,      note: "clicks per impression" },
-  { key: "cpc",            label: "CPC",         fmt: money2,   note: "cost per click",             invert: true },
-  { key: "cpm",            label: "CPM",         fmt: money2,   note: "cost per 1,000 impressions", invert: true },
-  { key: "frequency",      label: "Frequency",   fmt: freq,     note: "views per person" },
-  { key: "engagementRate", label: "Eng. Rate",   fmt: pct,      note: "engagements per impression" },
+  { key: "spend",          label: "Spend",        fmt: money0,   note: "invested" },
+  { key: "impressions",    label: "Impressions",  fmt: fmt,      note: "ad views served" },
+  { key: "reach",          label: "Reach",        fmt: fmt,      note: "unique people reached" },
+  { key: "clicks",         label: "Clicks",       fmt: fmtExact, note: "link + action clicks" },
+  { key: "ctr",            label: "CTR",          fmt: pct,      note: "clicks per impression" },
+  { key: "cpc",            label: "CPC",          fmt: money2,   note: "cost per click",             invert: true },
+  { key: "cpm",            label: "CPM",          fmt: money2,   note: "cost per 1,000 impressions", invert: true },
+  { key: "frequency",      label: "Frequency",    fmt: freq,     note: "views per person" },
+  { key: "engagementRate", label: "Eng. Rate",    fmt: pct,      note: "engagements per impression" },
+  { key: "conversions",    label: "Conversions",  fmt: fmtExact, note: "leads + actions taken" },
+  { key: "conversionRate", label: "Conv. Rate",   fmt: pct,      note: "conversions per click" },
+  { key: "cpa",            label: "Cost / Conv.", fmt: money2,   note: "cost per conversion",        invert: true },
 ];
 
 const METRIC_BY_KEY = Object.fromEntries(CAMPAIGN_METRICS.map(m => [m.key, m]));
@@ -155,19 +158,43 @@ function useCampaignMetrics(campaignId) {
   return { keys, toggle, reset };
 }
 
+// The full list is taller than the gap under a campaign header sitting low on
+// screen, so on open the menu measures the room above and below its trigger,
+// picks the roomier side, and caps its scroll area to what's actually there.
+const MENU_MAX = 408;
+const MENU_MIN = 180;
+const MENU_GAP = 16;
+
+function placeMenu(el) {
+  if (!el || typeof window === "undefined") return { up: false, max: MENU_MAX };
+  const rect = el.getBoundingClientRect();
+  const below = window.innerHeight - rect.bottom - MENU_GAP;
+  const above = rect.top - MENU_GAP;
+  const up = below < Math.min(MENU_MAX, above);
+  return { up, max: Math.max(MENU_MIN, Math.min(MENU_MAX, up ? above : below)) };
+}
+
 function MetricPicker({ selected, onToggle, onReset }) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState({ up: false, max: MENU_MAX });
   const ref = useRef(null);
 
   useEffect(() => {
     if (!open) return;
+    const reposition = () => setPlacement(placeMenu(ref.current));
+    reposition();
     const onPointerDown = e => { if (!ref.current?.contains(e.target)) setOpen(false); };
     const onKeyDown = e => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", reposition);
+    // Capture phase: the scroll that matters may be on an ancestor, not window.
+    window.addEventListener("scroll", reposition, true);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
   }, [open]);
 
@@ -185,29 +212,35 @@ function MetricPicker({ selected, onToggle, onReset }) {
         Metrics <span className="metric-picker-count num">{selected.length}</span>
       </button>
       {open && (
-        <div className="metric-picker-menu" role="group" aria-label="Choose which metrics to show">
+        <div
+          className={"metric-picker-menu" + (placement.up ? " is-up" : "")}
+          role="group"
+          aria-label="Choose which metrics to show"
+        >
           <div className="metric-picker-menu-head">
             <span>Show</span>
             <button type="button" className="metric-picker-reset" onClick={onReset}>Reset</button>
           </div>
-          {CAMPAIGN_METRICS.map(m => {
-            const checked = selected.includes(m.key);
-            return (
-              <label
-                key={m.key}
-                className={"metric-picker-item" + (checked && isLast ? " is-locked" : "")}
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={checked && isLast}
-                  onChange={() => onToggle(m.key)}
-                />
-                <span className="metric-picker-item-label">{m.label}</span>
-                <span className="metric-picker-item-note">{m.note}</span>
-              </label>
-            );
-          })}
+          <div className="metric-picker-list" style={{ "--menu-max": `${placement.max}px` }}>
+            {CAMPAIGN_METRICS.map(m => {
+              const checked = selected.includes(m.key);
+              return (
+                <label
+                  key={m.key}
+                  className={"metric-picker-item" + (checked && isLast ? " is-locked" : "")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={checked && isLast}
+                    onChange={() => onToggle(m.key)}
+                  />
+                  <span className="metric-picker-item-label">{m.label}</span>
+                  <span className="metric-picker-item-note">{m.note}</span>
+                </label>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
