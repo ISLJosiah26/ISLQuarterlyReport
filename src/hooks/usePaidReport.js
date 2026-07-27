@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase.js";
 import { AGENCIES, QUARTERS } from "../config.js";
-import { calcAutoDelta, sumPaidMediaAds } from "../utils.js";
+import { calcAutoDelta, sumPaidMediaAds, nfk } from "../utils.js";
 import { withRetry, friendlyError, getCached, setCached } from "../lib/fetching.js";
 import { AUDIENCE_DIMENSIONS } from "../lib/linkedinDemographics.js";
 
@@ -28,7 +28,54 @@ async function fetchPaid(agency, quarter) {
   return data;
 }
 
-function mapCampaigns(rawCampaigns) {
+// Group demographic rows into per-dimension panels, in the canonical dimension
+// order. Segments keep their stored order (which the importer writes strongest
+// first, and which parks the combined "Other" row at the end), each carrying
+// its CTR and share of the dimension's impressions so the report can show both
+// who saw the ads and who responded.
+function rollUpAudience(rawRows) {
+  const byDimension = new Map();
+  for (const r of rawRows || []) {
+    if (typeof r.impressions !== "number") continue;
+    if (!byDimension.has(r.dimension)) byDimension.set(r.dimension, []);
+    byDimension.get(r.dimension).push(r);
+  }
+  return AUDIENCE_DIMENSIONS
+    .filter(d => byDimension.has(d.key))
+    .map(d => {
+      const rows = [...byDimension.get(d.key)].sort((a, b) => a.sort_order - b.sort_order);
+      const total = rows.reduce((a, r) => a + r.impressions, 0);
+      const segments = rows.map(r => ({
+        name: r.segment,
+        impressions: r.impressions,
+        clicks: typeof r.clicks === "number" ? r.clicks : null,
+        ctr: typeof r.clicks === "number" && r.impressions > 0
+          ? (r.clicks / r.impressions) * 100
+          : null,
+        share: total > 0 ? (r.impressions / total) * 100 : null,
+        // The combined tail of a truncated import: counted in `total`, but
+        // presented apart from the named segments.
+        isOther: !!r.is_other,
+      }));
+      return { dimension: d.key, label: d.label, totalImpressions: total, segments };
+    });
+}
+
+// Demographics rows carry the campaign they describe; the ones imported before
+// breakdowns were campaign-scoped (and any genuinely account-level export)
+// have no campaign_id and roll up as an account-wide breakdown instead.
+function splitDemographicsByCampaign(rawRows) {
+  const byCampaign = new Map();
+  const accountWide = [];
+  for (const r of rawRows || []) {
+    if (!r.campaign_id) { accountWide.push(r); continue; }
+    if (!byCampaign.has(r.campaign_id)) byCampaign.set(r.campaign_id, []);
+    byCampaign.get(r.campaign_id).push(r);
+  }
+  return { byCampaign, accountWide };
+}
+
+function mapCampaigns(rawCampaigns, demographicsByCampaign = new Map()) {
   return [...(rawCampaigns || [])]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map(c => {
@@ -40,7 +87,6 @@ function mapCampaigns(rawCampaigns) {
           impressions: a.impressions,
           reach: a.reach,
           clicks: a.clicks,
-          conversions: a.conversions,
           cpc: a.cpc,
           engagementRate: a.engagement_rate,
           status: a.status || "active",
@@ -55,72 +101,38 @@ function mapCampaigns(rawCampaigns) {
         endDate: c.end_date || null,
         ads,
         totals: sumPaidMediaAds(ads),
+        audience: rollUpAudience(demographicsByCampaign.get(c.id)),
       };
     });
 }
 
-// Roll every ad up by the platform its campaign ran on. Campaigns with no
-// platform recorded collapse into a single "Unspecified" group so their spend
-// still shows up in the totals rather than silently vanishing.
-function rollUpPlatforms(campaigns) {
-  const groups = new Map();
+// Quarter-over-quarter movement for a single campaign, matched to last
+// quarter's campaign of the same name. Campaigns are recreated each quarter
+// rather than carried forward, so the name is the only stable handle — and a
+// renamed or brand-new campaign simply shows no deltas.
+function campaignDeltas(campaigns, prevCampaigns) {
+  const prevByName = new Map(prevCampaigns.map(c => [nfk(c.name), c.totals]));
   for (const c of campaigns) {
-    const name = c.platform.trim() || "Unspecified";
-    const key = name.toLowerCase();
-    if (!groups.has(key)) groups.set(key, { name, ads: [], campaignCount: 0 });
-    const g = groups.get(key);
-    g.ads.push(...c.ads);
-    g.campaignCount += 1;
+    const prev = prevByName.get(nfk(c.name));
+    c.deltas = {};
+    if (!prev) continue;
+    for (const key of Object.keys(c.totals)) {
+      const d = calcAutoDelta(c.totals[key], prev[key]);
+      if (d) c.deltas[key] = d;
+    }
   }
-  return [...groups.values()]
-    .map(g => ({ name: g.name, campaignCount: g.campaignCount, ...sumPaidMediaAds(g.ads) }))
-    .sort((a, b) => (b.spend || 0) - (a.spend || 0) || (b.impressions || 0) - (a.impressions || 0));
-}
-
-// Group demographic rows into per-dimension panels, in the canonical
-// dimension order. Segments sort by impressions (descending), each carrying
-// its CTR and share of the dimension's impressions so the report can show
-// both who saw the ads and who responded.
-function rollUpAudience(rawRows) {
-  const byDimension = new Map();
-  for (const r of rawRows || []) {
-    if (typeof r.impressions !== "number") continue;
-    if (!byDimension.has(r.dimension)) byDimension.set(r.dimension, []);
-    byDimension.get(r.dimension).push(r);
-  }
-  return AUDIENCE_DIMENSIONS
-    .filter(d => byDimension.has(d.key))
-    .map(d => {
-      const rows = byDimension.get(d.key);
-      const total = rows.reduce((a, r) => a + r.impressions, 0);
-      const segments = rows
-        .map(r => ({
-          name: r.segment,
-          impressions: r.impressions,
-          clicks: typeof r.clicks === "number" ? r.clicks : null,
-          ctr: typeof r.clicks === "number" && r.impressions > 0
-            ? (r.clicks / r.impressions) * 100
-            : null,
-          share: total > 0 ? (r.impressions / total) * 100 : null,
-        }))
-        .sort((a, b) => b.impressions - a.impressions);
-      return { dimension: d.key, label: d.label, totalImpressions: total, segments };
-    });
 }
 
 function normalize(report, agency, quarter, prev) {
   const qMeta = getQuarterMeta(quarter);
-  const campaigns = mapCampaigns(report?.paid_media_campaigns);
-  const audience = rollUpAudience(report?.paid_media_demographics);
+  const { byCampaign, accountWide } = splitDemographicsByCampaign(report?.paid_media_demographics);
+  const campaigns = mapCampaigns(report?.paid_media_campaigns, byCampaign);
+  const audience = rollUpAudience(accountWide);
   const totals = sumPaidMediaAds(campaigns.flatMap(c => c.ads));
 
-  const prevCampaigns = mapCampaigns(prev?.paid_media_campaigns);
-  const prevTotals = sumPaidMediaAds(prevCampaigns.flatMap(c => c.ads));
-  const deltas = {};
-  for (const key of Object.keys(totals)) {
-    const d = calcAutoDelta(totals[key], prevTotals[key]);
-    if (d) deltas[key] = d;
-  }
+  campaignDeltas(campaigns, mapCampaigns(prev?.paid_media_campaigns));
+
+  const platforms = [...new Set(campaigns.map(c => c.platform.trim()).filter(Boolean))];
 
   return {
     meta: {
@@ -131,8 +143,7 @@ function normalize(report, agency, quarter, prev) {
     },
     campaigns,
     totals,
-    deltas,
-    platforms: rollUpPlatforms(campaigns),
+    platforms,
     audience,
     hasData: campaigns.length > 0 || audience.length > 0,
   };
