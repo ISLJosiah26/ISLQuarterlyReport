@@ -626,12 +626,107 @@
   .paid-media-status.is-completed { color: var(--ink-3); border: 1px solid var(--rule-soft); }
   .paid-media-status.is-draft     { color: var(--ink-4); border: 1px solid var(--rule-soft); }
 
-  /* Paid Media page — campaign cards */
-  .paid-campaign            { padding-top: 30px; border-top: 1px solid var(--rule); }
+  /* Paid Media page — the whole report is a list of expandable campaigns */
+  .section-head--split      { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .campaign-expand-all {
+    font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3);
+    padding: 7px 14px; border: 1px solid var(--rule); border-radius: 99px; background: var(--paper);
+    transition: color .12s ease, border-color .12s ease;
+  }
+  .campaign-expand-all:hover { color: var(--ink); border-color: var(--ink); }
+  .campaign-expand-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .paid-campaign            { padding-top: 26px; border-top: 1px solid var(--rule); scroll-margin-top: 96px; }
   .paid-campaign:first-child { padding-top: 0; border-top: 0; }
-  .paid-campaign-head       { display: flex; align-items: baseline; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 16px; }
+  .paid-campaign-head       { display: flex; align-items: center; justify-content: space-between; gap: 14px 28px; flex-wrap: wrap; }
   .paid-campaign-name       { font-size: 24px; color: var(--ink); }
-  .paid-campaign-tags       { display: flex; gap: 8px; flex-wrap: wrap; }
+  .paid-campaign-tags       { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+  /* Campaign header doubles as the disclosure control */
+  .campaign-toggle {
+    display: flex; align-items: flex-start; gap: 14px; flex: 1 1 320px;
+    text-align: left; padding: 4px 0; background: none; border: 0; cursor: pointer;
+  }
+  .campaign-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+  .campaign-toggle-text     { display: block; min-width: 0; }
+  .campaign-toggle-chevron {
+    flex-shrink: 0; width: 9px; height: 9px; margin-top: 11px;
+    border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3);
+    transform: rotate(-45deg); transition: transform .2s ease, border-color .2s ease;
+  }
+  .paid-campaign.is-open .campaign-toggle-chevron { transform: rotate(45deg); border-color: var(--accent); }
+  .campaign-toggle:hover .campaign-toggle-chevron { border-color: var(--ink); }
+
+  /* Headline figures, readable without opening the campaign */
+  .campaign-summary         { display: flex; gap: 28px; flex-wrap: wrap; }
+  .campaign-summary-chip    { display: flex; flex-direction: column; gap: 3px; }
+  .campaign-summary-label   { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-4); font-weight: 500; }
+  .campaign-summary-value   { font-family: var(--serif); font-size: 19px; line-height: 1; color: var(--ink-2); font-variant-numeric: tabular-nums lining-nums; }
+
+  .paid-campaign-body       { padding: 26px 0 6px; }
+  .paid-campaign.is-open .paid-campaign-body { animation: fadeUp 0.3s ease both; }
+  .campaign-block-head      { margin-bottom: 16px; }
+  .campaign-block-title     { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); font-weight: 400; }
+  .campaign-block-sub       { max-width: 64ch; margin: 6px 0 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
+  .campaign-ads             { margin-top: 34px; }
+  .campaign-ads .campaign-block-title { margin-bottom: 14px; }
+  .campaign-audience        { margin-top: 38px; }
+
+  .campaign-metrics-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; margin-bottom: 22px;
+  }
+
+  /* Per-campaign KPI grid — the reader picks which of these show */
+  .campaign-kpi-grid        { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 36px; row-gap: 34px; margin-bottom: 30px; }
+  .campaign-kpi             { display: flex; flex-direction: column; gap: 9px; padding-top: 13px; border-top: 1px solid var(--ink); animation: fadeUp 0.4s ease both; animation-delay: calc(var(--i, 0) * 45ms); }
+  .campaign-kpi-label       { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  .campaign-kpi-value       { font-family: var(--serif); font-size: clamp(30px, 3vw, 40px); line-height: 1; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums lining-nums; font-weight: 300; }
+  .campaign-kpi-foot        { display: flex; align-items: baseline; gap: 9px; font-size: 12px; color: var(--ink-3); min-height: 16px; }
+
+  /* Metric chooser */
+  .metric-picker            { position: relative; flex-shrink: 0; }
+  .metric-picker-btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3);
+    padding: 7px 14px; border: 1px solid var(--rule); border-radius: 99px; background: var(--paper);
+    transition: color .12s ease, border-color .12s ease;
+  }
+  .metric-picker-btn:hover,
+  .metric-picker-btn.is-open { color: var(--ink); border-color: var(--ink); }
+  .metric-picker-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .metric-picker-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 99px;
+    background: var(--paper-2); color: var(--ink-2); font-size: 11px; letter-spacing: 0;
+  }
+  /* Opaque, not glass: this menu opens directly over the KPI figures, and a
+     translucent panel makes both the menu and the numbers behind it unreadable. */
+  .metric-picker-menu {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+    min-width: 268px; padding: 6px;
+    background: var(--paper); border: 1px solid var(--rule);
+    border-radius: var(--radius-l); box-shadow: var(--shadow-pop);
+  }
+  .metric-picker-menu-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 8px 10px 6px; font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--ink-4);
+  }
+  .metric-picker-reset { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  .metric-picker-reset:hover { text-decoration: underline; }
+  .metric-picker-item {
+    display: grid; grid-template-columns: auto 1fr; align-items: center;
+    column-gap: 10px; padding: 7px 10px; border-radius: var(--radius-s);
+    font-size: 13px; color: var(--ink-2); cursor: pointer;
+    transition: background .12s ease;
+  }
+  .metric-picker-item:hover { background: var(--paper-2); color: var(--ink); }
+  .metric-picker-item.is-locked { cursor: default; }
+  .metric-picker-item input { accent-color: var(--accent); width: 14px; height: 14px; }
+  .metric-picker-item input:disabled { opacity: 0.5; }
+  .metric-picker-item-label { font-weight: 500; }
+  .metric-picker-item-note  { grid-column: 2; font-size: 11px; color: var(--ink-4); }
   .paid-tag                 { display: inline-flex; align-items: center; font-family: var(--sans); font-size: 11px; letter-spacing: 0.04em; color: var(--ink-2); padding: 3px 11px; border: 1px solid var(--rule); border-radius: 99px; background: var(--paper); white-space: nowrap; }
   .paid-tag--platform       { border-color: var(--accent); color: var(--accent); font-weight: 500; }
   .paid-tag--muted          { color: var(--ink-4); }
@@ -643,12 +738,6 @@
   .paid-budget-fill.is-over { background: var(--down); }
   .paid-budget-foot         { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums lining-nums; }
   .paid-budget-foot strong  { color: var(--ink); font-weight: 600; }
-
-  /* Derived per-campaign stat strip */
-  .paid-stat-strip          { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 18px; margin-bottom: 24px; }
-  .paid-stat                { display: flex; flex-direction: column; gap: 5px; padding-top: 10px; border-top: 1px solid var(--rule-soft); }
-  .paid-stat-label          { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
-  .paid-stat-value          { font-size: 21px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums lining-nums; }
 
   /* Calendar */
   .calendar-view { display: flex; flex-direction: column; gap: 30px; }
@@ -911,6 +1000,7 @@
   /* KPI grid — also handled by container queries above */
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .paid-media-kpis { grid-template-columns: repeat(3, 1fr); }
+  .campaign-kpi-grid { grid-template-columns: repeat(2, 1fr); column-gap: 28px; }
 
   .channel-row { grid-template-columns: 0.4fr 1.6fr 1fr 1fr; }
   .channel-row > div:nth-child(5),
@@ -958,6 +1048,13 @@
   .kpi-grid { column-gap: 24px; row-gap: 40px; }
   .paid-media-kpis { grid-template-columns: repeat(2, 1fr); }
   .section-head { margin-bottom: 28px; }
+
+  /* Campaign header stacks: title above its headline figures */
+  .paid-campaign-head  { align-items: flex-start; }
+  .campaign-summary    { gap: 20px; padding-left: 23px; }
+  .campaign-summary-value { font-size: 17px; }
+  .campaign-metrics-bar { flex-wrap: wrap; }
+  .metric-picker-menu  { right: auto; left: 0; min-width: min(268px, calc(100vw - 48px)); }
 }
 
 /* ── Phone portrait (≤560px) ────────────────────────────────── */
@@ -975,6 +1072,10 @@
   .hero-b-top  { flex-direction: column; align-items: flex-start; gap: 12px; }
   .hero-b-q    { font-size: 34px; }
   .hero-b-note { font-size: 17px; margin-bottom: 8px; }
+
+  .campaign-kpi-grid { grid-template-columns: 1fr; row-gap: 26px; }
+  .campaign-kpi-value { font-size: 32px; }
+  .paid-campaign-name { font-size: 20px; }
 
   .trend-legend { flex-wrap: wrap; row-gap: 12px; }
   .colophon     { padding-bottom: 40px; }
@@ -1654,6 +1755,14 @@
 .aud-ctr-val {
   font-size: 12px; color: var(--ink-3); text-align: right; font-variant-numeric: tabular-nums lining-nums;
 }
+/* The combined tail of a truncated import — a remainder, set apart from the
+   named segments it sits beneath. */
+.aud-row--other {
+  margin-top: 5px; padding-top: 11px; border-top: 1px solid var(--rule-soft);
+}
+.aud-row--other .aud-label,
+.aud-row--other .aud-share-val { color: var(--ink-4); }
+.aud-row--other .aud-share-fill { background: var(--ink-4); }
 .aud-more {
   margin-top: 12px; font-family: var(--sans); font-size: 12px; letter-spacing: 0.02em;
   color: var(--accent); background: none; border: none; padding: 2px 0; cursor: pointer;
