@@ -18,15 +18,27 @@
 import { parseCsvRecords } from "./formSubmissions.js";
 
 // Canonical dimensions, in the order the report presents them.
+//
+// `layout` picks how the report draws a breakdown, and the two answer
+// different questions. "bars" is for a handful of segments that partition the
+// audience — job function, seniority — where each one's share of impressions
+// is the story and the bars read as a distribution. "list" is for a roster of
+// named accounts, where a share of 1.6% says nothing useful and the real
+// question is which of them engaged; those are ranked by clicks and drawn as
+// a table, so the ranking is visible in the numbers.
 export const AUDIENCE_DIMENSIONS = [
-  { key: "job_function", label: "Job Function" },
-  { key: "seniority",    label: "Seniority" },
-  { key: "industry",     label: "Industry" },
-  { key: "company_size", label: "Company Size" },
-  { key: "location",     label: "Location" },
-  { key: "company",      label: "Company" },
-  { key: "job_title",    label: "Job Title" },
+  { key: "job_function", label: "Job Function", layout: "bars" },
+  { key: "seniority",    label: "Seniority",    layout: "bars" },
+  { key: "industry",     label: "Industry",     layout: "bars" },
+  { key: "company_size", label: "Company Size", layout: "bars" },
+  { key: "location",     label: "Location",     layout: "bars" },
+  { key: "company",      label: "Company",      layout: "list" },
+  { key: "job_title",    label: "Job Title",    layout: "bars" },
 ];
+
+export const AUDIENCE_LAYOUTS = Object.fromEntries(
+  AUDIENCE_DIMENSIONS.map(d => [d.key, d.layout])
+);
 
 export const AUDIENCE_DIMENSION_LABELS = Object.fromEntries(
   AUDIENCE_DIMENSIONS.map(d => [d.key, d.label])
@@ -40,9 +52,9 @@ export const MAX_SEGMENTS = 100;
 
 const otherLabel = (n) => `Other (${n.toLocaleString()} more)`;
 
-// Companies rank by clicks rather than impressions. On the other dimensions
-// the question is who the ads reached, and impressions answer it; on a list of
-// thousands of named accounts the useful question is which ones responded, and
+// A "list" breakdown ranks by clicks; a "bars" one by impressions. On a
+// distribution the question is who the ads reached, and impressions answer it.
+// On a roster of named accounts the useful question is which ones responded —
 // a company that clicked twice is worth more attention than one served 400
 // impressions that never did. Impressions break the tie, so the zero-click
 // tail still leads with the companies that saw the ads most.
@@ -53,10 +65,8 @@ const otherLabel = (n) => `Other (${n.toLocaleString()} more)`;
 // Exported because the report sorts with it too. Ranking only at import time
 // would freeze whatever rule was in force the day a file was uploaded, so a
 // change here would silently skip every breakdown already in the database.
-const RANK_BY_CLICKS = new Set(["company"]);
-
 export function compareSegments(dimension) {
-  if (!RANK_BY_CLICKS.has(dimension)) return (a, b) => b.impressions - a.impressions;
+  if (AUDIENCE_LAYOUTS[dimension] !== "list") return (a, b) => b.impressions - a.impressions;
   return (a, b) => (b.clicks || 0) - (a.clicks || 0) || b.impressions - a.impressions;
 }
 

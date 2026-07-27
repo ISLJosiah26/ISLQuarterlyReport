@@ -61,7 +61,7 @@ function rollUpAudience(rawRows) {
         // presented apart from the named segments.
         isOther: !!r.is_other,
       }));
-      return { dimension: d.key, label: d.label, totalImpressions: total, segments };
+      return { dimension: d.key, label: d.label, layout: d.layout, totalImpressions: total, segments };
     });
 }
 
