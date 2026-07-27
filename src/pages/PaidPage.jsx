@@ -269,53 +269,33 @@ function MetricGrid({ metricKeys, totals, deltas }) {
 }
 
 // ─── Audience (LinkedIn demographics) ─────────────────────────────
-// The strongest value across a dimension's segments. Both meters are drawn
-// relative to their panel's leader rather than to 100%, so segments stay
-// comparable within a panel — on a long-tail dimension like Company, where
-// every segment is a low single-digit share, absolute-width bars would all
-// flatten to the same nub. The figure printed beside each bar stays absolute.
-function maxOf(segments, key) {
-  return segments.reduce((m, s) => (s[key] != null && s[key] > m ? s[key] : m), 0);
-}
-
-function AudienceSegment({ seg, ctrScale, shareScale }) {
-  // The combined tail can outweigh every named segment, so it pins at full
-  // width rather than overflowing the scale set by the leader.
-  const share = seg.share != null && shareScale > 0
-    ? Math.min(100, (seg.share / shareScale) * 100)
-    : 0;
-  return (
-    <div className={"aud-row" + (seg.isOther ? " aud-row--other" : "")}>
-      <span className="aud-label" title={seg.name}>{seg.name}</span>
-      <span className="aud-share-track">
-        <span className="aud-share-fill" style={{ width: `${Math.max(2, share)}%` }} />
-      </span>
-      <span className="aud-share-val num">{seg.share != null ? seg.share.toFixed(1) + "%" : "—"}</span>
-      <span className="aud-ctr">
-        <span className="aud-ctr-track">
-          <span className="aud-ctr-fill"
-            style={{ width: ctrScale > 0 && seg.ctr != null ? `${Math.max(2, (seg.ctr / ctrScale) * 100)}%` : "0%" }} />
-        </span>
-        <span className="aud-ctr-val num">{seg.ctr != null ? seg.ctr.toFixed(2) + "%" : "—"}</span>
-      </span>
-    </div>
-  );
-}
-
-// How many segments to show before folding the tail into "Other" — long-tail
-// dimensions (company, job title) would otherwise run to dozens of rows.
+// How many segments to show before the rest fold behind "show more".
 const AUDIENCE_VISIBLE = 8;
 
-function AudiencePanel({ panel }) {
-  const [expanded, setExpanded] = useState(false);
-  // The combined tail sits below the named segments and stays out of the
-  // "show more" count and the bar scale — it's a remainder, not a rival.
-  const segs = panel.segments.filter(s => !s.isOther);
-  const other = panel.segments.find(s => s.isOther);
-  const shown = expanded ? segs : segs.slice(0, AUDIENCE_VISIBLE);
-  const hidden = segs.length - shown.length;
-  const ctrScale = maxOf(segs, "ctr");
-  const shareScale = maxOf(segs, "share");
+// Splits a panel into the named segments and the combined tail. The tail is a
+// remainder, not a rival: it's kept out of the ranked rows, the "show more"
+// count and the bar scale, and drawn apart at the foot of the panel.
+function splitSegments(panel, expanded) {
+  const named = panel.segments.filter(s => !s.isOther);
+  return {
+    other: panel.segments.find(s => s.isOther),
+    shown: expanded ? named : named.slice(0, AUDIENCE_VISIBLE),
+    total: named.length,
+  };
+}
+
+function ShowMore({ hidden, expanded, total, onExpand, onCollapse }) {
+  if (hidden > 0) return <button className="aud-more" onClick={onExpand}>Show {hidden} more</button>;
+  if (expanded && total > AUDIENCE_VISIBLE) return <button className="aud-more" onClick={onCollapse}>Show less</button>;
+  return null;
+}
+
+// ── Distribution: a handful of segments that partition the audience ──
+// One bar per row, drawn against the full track so its length matches the
+// percentage printed beside it. CTR rides along as a plain figure — as a
+// second meter it competed with the share bar for attention and neither won.
+function AudienceBars({ panel, expanded, setExpanded }) {
+  const { shown, other, total } = splitSegments(panel, expanded);
   return (
     <div className="aud-panel">
       <div className="aud-panel-head">
@@ -326,23 +306,83 @@ function AudiencePanel({ panel }) {
         </div>
       </div>
       <div className="aud-rows">
-        {shown.map(seg => (
-          <AudienceSegment key={seg.name} seg={seg} ctrScale={ctrScale} shareScale={shareScale} />
+        {[...shown, ...(other ? [other] : [])].map(seg => (
+          <div className={"aud-row" + (seg.isOther ? " aud-row--other" : "")} key={seg.name}>
+            <span className="aud-label" title={seg.name}>{seg.name}</span>
+            <span className="aud-share-track">
+              <span className="aud-share-fill" style={{ width: `${Math.max(1.5, seg.share ?? 0)}%` }} />
+            </span>
+            <span className="aud-share-val num">{seg.share != null ? seg.share.toFixed(1) + "%" : "—"}</span>
+            <span className="aud-ctr-val num">{seg.ctr != null ? seg.ctr.toFixed(2) + "%" : "—"}</span>
+          </div>
         ))}
-        {other && (
-          <AudienceSegment seg={other} ctrScale={ctrScale} shareScale={shareScale} />
-        )}
       </div>
-      {hidden > 0 && (
-        <button className="aud-more" onClick={() => setExpanded(true)}>
-          Show {hidden} more
-        </button>
-      )}
-      {expanded && segs.length > AUDIENCE_VISIBLE && (
-        <button className="aud-more" onClick={() => setExpanded(false)}>Show less</button>
-      )}
+      <ShowMore hidden={total - shown.length} expanded={expanded} total={total}
+        onExpand={() => setExpanded(true)} onCollapse={() => setExpanded(false)} />
     </div>
   );
+}
+
+// ── Roster: named accounts, ranked by the clicks they gave us ──
+// A table rather than bars. Ranking by clicks while showing only share and CTR
+// left the order looking arbitrary, so clicks get a column of their own and
+// the ranking reads straight down it.
+//
+// CTR is a plain figure here for a reason: at these volumes it's mostly noise
+// (10 clicks on 13 impressions is 77%), and as a scaled meter it made the
+// smallest accounts look like the strongest.
+function AudienceRoster({ panel, expanded, setExpanded }) {
+  const { shown, other, total } = splitSegments(panel, expanded);
+  return (
+    <div className="aud-panel aud-panel--wide">
+      <div className="aud-panel-head">
+        <h4 className="aud-panel-title serif">{panel.label}</h4>
+        <span className="aud-panel-note">Ranked by clicks</span>
+      </div>
+      <div className="table-wrap">
+        <table className="table aud-table">
+          <thead>
+            <tr>
+              {/* The panel heading already names the dimension — repeating it
+                  as a column header just reads as a stutter. */}
+              <th scope="col"><span className="sr-only">{panel.label}</span></th>
+              <th scope="col" className="r">Impressions</th>
+              <th scope="col" className="r">Clicks</th>
+              <th scope="col" className="r">CTR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map(seg => (
+              <tr key={seg.name}>
+                <th scope="row"><span className="aud-table-name" title={seg.name}>{seg.name}</span></th>
+                <td className="r num">{fmtExact(seg.impressions)}</td>
+                <td className="r num">{seg.clicks ? fmtExact(seg.clicks) : "—"}</td>
+                <td className="r num">{seg.ctr != null ? seg.ctr.toFixed(2) + "%" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+          {other && (
+            <tfoot>
+              <tr className="aud-table-other">
+                <th scope="row">{other.name}</th>
+                <td className="r num">{fmtExact(other.impressions)}</td>
+                <td className="r num">{other.clicks ? fmtExact(other.clicks) : "—"}</td>
+                <td className="r num">{other.ctr != null ? other.ctr.toFixed(2) + "%" : "—"}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      <ShowMore hidden={total - shown.length} expanded={expanded} total={total}
+        onExpand={() => setExpanded(true)} onCollapse={() => setExpanded(false)} />
+    </div>
+  );
+}
+
+function AudiencePanel({ panel }) {
+  const [expanded, setExpanded] = useState(false);
+  const Layout = panel.layout === "list" ? AudienceRoster : AudienceBars;
+  return <Layout panel={panel} expanded={expanded} setExpanded={setExpanded} />;
 }
 
 function AudienceBlock({ panels, title }) {
