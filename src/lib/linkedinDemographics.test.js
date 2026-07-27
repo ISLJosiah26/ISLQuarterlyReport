@@ -61,6 +61,36 @@ describe("parseLinkedInDemographics", () => {
       .toEqual(["Big", "Mid", "Small"]);
   });
 
+  it("ranks companies by clicks, falling back to impressions", () => {
+    const csv = [
+      "Company name,Paid impressions,Paid clicks",
+      "Served but silent,900,",
+      "One click big,400,1",
+      "Two clicks small,20,2",
+      "One click small,30,1",
+      "Also silent,500,0",
+    ].join("\n");
+    expect(parseLinkedInDemographics(csv).rows.map(r => r.segment)).toEqual([
+      "Two clicks small",   // 2 clicks
+      "One click big",      // 1 click, 400 impressions
+      "One click small",    // 1 click, 30 impressions
+      "Served but silent",  // no clicks — ranked by impressions
+      "Also silent",
+    ]);
+  });
+
+  it("keeps the companies that clicked when it cuts the tail", () => {
+    // A clicker buried at the bottom of an impressions-ordered file still has
+    // to survive the cut.
+    const bulk = Array.from({ length: MAX_SEGMENTS + 40 }, (_, i) => `Silent ${i},${900 - i},0`);
+    const out = parseLinkedInDemographics(
+      ["Company name,Paid impressions,Paid clicks", ...bulk, "Late clicker,3,4"].join("\n")
+    );
+    expect(out.rows[0].segment).toBe("Late clicker");
+    // MAX_SEGMENTS + 40 silent rows plus the clicker, so 41 fall past the cut.
+    expect(out.truncated).toBe(41);
+  });
+
   // ── Page analytics "Companies" export ──
   const COMPANIES_HEADER =
     "Company name,Company page URL,Engagement level,Organic impressions," +

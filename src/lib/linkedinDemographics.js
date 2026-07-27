@@ -40,6 +40,22 @@ export const MAX_SEGMENTS = 100;
 
 const otherLabel = (n) => `Other (${n.toLocaleString()} more)`;
 
+// Companies rank by clicks rather than impressions. On the other dimensions
+// the question is who the ads reached, and impressions answer it; on a list of
+// thousands of named accounts the useful question is which ones responded, and
+// a company that clicked twice is worth more attention than one served 400
+// impressions that never did. Impressions break the tie, so the zero-click
+// tail still leads with the companies that saw the ads most.
+//
+// This orders the stored rows, so it also decides which segments survive the
+// MAX_SEGMENTS cut — the clickers are kept, not just the most-served.
+const RANK_BY_CLICKS = new Set(["company"]);
+
+function compareSegments(dimension) {
+  if (!RANK_BY_CLICKS.has(dimension)) return (a, b) => b.impressions - a.impressions;
+  return (a, b) => (b.clicks || 0) - (a.clicks || 0) || b.impressions - a.impressions;
+}
+
 // Header-name → dimension key. Ordered so the more specific names win
 // ("company size" before "company").
 const DIMENSION_MATCHERS = [
@@ -130,7 +146,7 @@ export function parseLinkedInDemographics(text) {
     }
     if (!rows.length) return null;
 
-    rows.sort((a, b) => b.impressions - a.impressions);
+    rows.sort(compareSegments(dimension));
     const kept = rows.slice(0, MAX_SEGMENTS);
     const tail = rows.slice(MAX_SEGMENTS);
     if (tail.length) {
