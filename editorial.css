@@ -715,6 +715,15 @@
   }
   .metric-picker-reset { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
   .metric-picker-reset:hover { text-decoration: underline; }
+  /* The full metric list is taller than the room under a campaign header low
+     on screen, so it scrolls inside the menu — bounded by --menu-max, which
+     the picker sets from the space actually available — and leaves the
+     Show/Reset header pinned. */
+  .metric-picker-list {
+    max-height: var(--menu-max, 408px); overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* Flipped above its trigger when there's more room up than down */
+  .metric-picker-menu.is-up { top: auto; bottom: calc(100% + 8px); }
   .metric-picker-item {
     display: grid; grid-template-columns: auto 1fr; align-items: center;
     column-gap: 10px; padding: 7px 10px; border-radius: var(--radius-s);

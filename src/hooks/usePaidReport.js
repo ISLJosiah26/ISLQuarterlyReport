@@ -87,6 +87,7 @@ function mapCampaigns(rawCampaigns, demographicsByCampaign = new Map()) {
           impressions: a.impressions,
           reach: a.reach,
           clicks: a.clicks,
+          conversions: a.conversions,
           cpc: a.cpc,
           engagementRate: a.engagement_rate,
           status: a.status || "active",
