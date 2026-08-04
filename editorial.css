@@ -1703,6 +1703,15 @@
 .cf-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-bottom: 56px; }
 .cf-panel--wide  { margin-bottom: 8px; }
 .cf-panel-title  { font-size: 20px; letter-spacing: -0.01em; margin-bottom: 18px; }
+.cf-panel-head   { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.cf-panel-head .cf-panel-title { margin-bottom: 0; }
+/* The week-by-week source chart is a full-width panel of its own, not the
+   section's last element — it keeps the normal between-panel rhythm. */
+.cf-trend { margin-bottom: 56px; }
+/* Many short rows on a shared axis: below ~720px the week columns collapse
+   into slivers, so the panel scrolls sideways at a readable minimum width. */
+.cf-trend-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cf-trend-scroll > .cf-chart-area { min-width: 620px; }
 .cf-bars    { display: grid; gap: 10px; }
 .cf-bar-row { display: grid; grid-template-columns: 170px 1fr 52px; align-items: center; gap: 12px; }
 .cf-bar-label { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

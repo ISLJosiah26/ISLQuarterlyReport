@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { QUARTERS } from "../config.js";
 import { fmtInt, calcAutoDelta, FLAT } from "../utils.js";
+import { buildSourceTrend, findSourceSpike } from "../lib/sourceTrends.js";
 import { CountUp } from "./CountUp.jsx";
 import { Delta } from "./Delta.jsx";
 
@@ -20,6 +21,9 @@ function mondayOf(date) {
   return d;
 }
 
+const weekKey = d =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 // Continuous Monday-keyed weeks across the quarter (up to today for the
 // current quarter), zero-filled where the stats have no bucket, so quiet
 // weeks show as quiet instead of vanishing from the x-axis.
@@ -29,9 +33,9 @@ function fillWeeks(weekly, q) {
   const out = [];
   const stop = Math.min(Date.now(), q.end.getTime() - 1);
   for (let m = mondayOf(q.start); m.getTime() <= stop; m.setDate(m.getDate() + 7)) {
-    const key = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}-${String(m.getDate()).padStart(2, "0")}`;
+    const key = weekKey(m);
     const w = byKey[key] || {};
-    out.push({ date: new Date(m), work: w.work || 0, staff: w.staff || 0, total: w.total || 0 });
+    out.push({ date: new Date(m), key, work: w.work || 0, staff: w.staff || 0, total: w.total || 0 });
   }
   return out;
 }
@@ -202,6 +206,161 @@ function Sources({ sources, sourceSince, sourceEligible, q }) {
   );
 }
 
+// ─── "How they heard about us" week by week ───────────────────────
+// One mini bar chart per answer, stacked on a shared week axis: a week that
+// spikes lines up across every row, so it's obvious whether one answer moved
+// or the whole quarter did.
+const clipLabel = s => (s.length > 30 ? s.slice(0, 29) + "…" : s);
+const fmtTypical = n => (n % 1 ? n.toFixed(1) : String(n));
+
+function SourceTrend({ sources, sourceWeekly, sourceSince, weeks }) {
+  const [hover, setHover] = useState(null);
+  // Per-answer scaling by default: the question this panel answers is "did any
+  // one answer jump", and a shared scale hides that under the biggest answer.
+  const [ownScale, setOwnScale] = useState(true);
+
+  const { rows, max, coveredFrom } = useMemo(() => buildSourceTrend({
+    sourceWeekly,
+    sources,
+    weekKeys: weeks.map(w => w.key),
+    since: sourceSince,
+  }), [sourceWeekly, sources, sourceSince, weeks]);
+
+  const spike = useMemo(() => findSourceSpike(rows, coveredFrom), [rows, coveredFrom]);
+
+  // Two answers over three weeks is a table, not a trend. A payload from
+  // before the breakdown existed has no sourceWeekly at all — stay off the page.
+  if (!sourceWeekly?.length || rows.length < 2 || weeks.length - coveredFrom < 3) return null;
+
+  const W = 1100, pL = 210, pR = 52, pT = 10, pB = 30;
+  // Rows need real height: on the shared scale one big answer sets the ceiling,
+  // and at 22px everything below it collapses into a dash.
+  const rh = 32, pitch = 44;
+  const plotBottom = pT + (rows.length - 1) * pitch + rh;
+  const H = plotBottom + pB;
+  const colStep = (W - pL - pR) / weeks.length;
+  const barW = Math.min(12, colStep - 6);
+  const cx = i => pL + colStep * (i + 0.5);
+  const baseY = r => pT + r * pitch + rh;
+  const labelEvery = weeks.length > 10 ? Math.ceil(weeks.length / 7) : 1;
+
+  const onMove = e => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * W;
+    const i = Math.floor((px - pL) / colStep);
+    setHover(i >= 0 && i < weeks.length ? i : null);
+  };
+
+  const hovered = hover != null
+    ? rows.map(r => ({ source: r.source, count: r.values[hover] }))
+        .filter(r => r.count > 0)
+        .sort((a, b) => b.count - a.count)
+    : [];
+
+  // Sit the tooltip beside the hovered week rather than over it — with this
+  // many rows a centred card would cover the column being read. It flips to
+  // the near side once past the midpoint so it never leaves the panel.
+  const tooltipStyle = i => {
+    const left = (cx(i) / W) * 100;
+    return {
+      left: `${left}%`,
+      transform: left > 50 ? "translateX(calc(-100% - 14px))" : "translateX(14px)",
+    };
+  };
+
+  return (
+    <div className="cf-panel cf-panel--wide cf-trend">
+      <div className="cf-panel-head">
+        <h3 className="cf-panel-title serif">How they heard about us, week by week</h3>
+        <div className="view-toggle" role="group" aria-label="Bar scale">
+          <button type="button" className={`toggle-btn${ownScale ? " is-active" : ""}`}
+            aria-pressed={ownScale} onClick={() => setOwnScale(true)}>Per answer</button>
+          <button type="button" className={`toggle-btn${ownScale ? "" : " is-active"}`}
+            aria-pressed={!ownScale} onClick={() => setOwnScale(false)}>Shared scale</button>
+        </div>
+      </div>
+
+      <div className="cf-trend-scroll">
+        <div className="cf-chart-area">
+          <svg className="cf-chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
+            role="img"
+            aria-label={`Weekly count for each "how did you hear about us" answer across the quarter${spike ? `. ${spike.source} peaks at ${spike.count} in the week of ${dayLabel(weeks[spike.at].date)}` : ""}`}
+            onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+
+            {/* Weeks before the question existed — blank by design, not by silence */}
+            {coveredFrom > 0 && (
+              <g>
+                <rect x={pL} y={pT - 4} width={colStep * coveredFrom} height={plotBottom - pT + 8}
+                  fill="var(--paper-2)" />
+                <text x={pL + (colStep * coveredFrom) / 2} y={plotBottom + 18} textAnchor="middle"
+                  fontSize="10" fill="var(--ink-4)" fontFamily="var(--sans)">not asked yet</text>
+              </g>
+            )}
+
+            {hover != null && (
+              <rect x={pL + colStep * hover} y={pT - 4} width={colStep} height={plotBottom - pT + 8}
+                fill="var(--rule-soft)" />
+            )}
+
+            {rows.map((row, r) => {
+              const scale = ownScale ? Math.max(1, row.peak) : max;
+              return (
+                <g key={row.source}>
+                  <text x={pL - 12} y={baseY(r) - 5} textAnchor="end" fontSize="12"
+                    fill="var(--ink-2)" fontFamily="var(--sans)">{clipLabel(row.source)}</text>
+                  <line x1={pL} x2={W - pR} y1={baseY(r) + 0.5} y2={baseY(r) + 0.5}
+                    stroke="var(--rule-soft)" strokeWidth="1" />
+                  {row.values.map((v, i) => {
+                    if (v <= 0 || i < coveredFrom) return null;
+                    const h = Math.max(2, (v / scale) * rh);
+                    return (
+                      <rect key={i} x={cx(i) - barW / 2} y={baseY(r) - h} width={barW} height={h}
+                        rx={Math.min(3, barW / 2)} fill={WORK}
+                        opacity={hover == null || hover === i ? 1 : 0.35} />
+                    );
+                  })}
+                  <text x={W - 4} y={baseY(r) - 5} textAnchor="end" fontSize="12"
+                    fill="var(--ink-3)" fontFamily="var(--sans)"
+                    style={{ fontVariantNumeric: "tabular-nums" }}>{fmtInt(row.total)}</text>
+                </g>
+              );
+            })}
+
+            {weeks.map((w, i) => (i % labelEvery === 0 || i === weeks.length - 1) && (
+              <text key={i} x={cx(i)} y={plotBottom + 18} textAnchor="middle" fontSize="11"
+                fill="var(--ink-3)" fontFamily="var(--sans)">{dayLabel(w.date)}</text>
+            ))}
+          </svg>
+
+          {hover != null && (
+            <div className="cf-tooltip" style={tooltipStyle(hover)}>
+              <div className="cf-tooltip-title">Week of {dayLabel(weeks[hover].date)}</div>
+              {hover < coveredFrom
+                ? <div className="cf-tooltip-row">Question not on the form yet</div>
+                : hovered.length === 0
+                  ? <div className="cf-tooltip-row">No answers</div>
+                  : hovered.map(h => (
+                      // No swatch — every row is the same hue here, so a dot
+                      // would imply a colour key that doesn't exist.
+                      <div className="cf-tooltip-row" key={h.source}>
+                        {clipLabel(h.source)} <strong>{fmtInt(h.count)}</strong>
+                      </div>
+                    ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="cf-note">
+        {ownScale
+          ? "Each answer is scaled to its own best week, so a jump in a small answer is still visible — heights don't compare between rows."
+          : "Every answer shares one scale, so bar heights compare directly from row to row. Switch to Per answer to see the shape of the quieter ones."}
+        {spike && ` Sharpest move: ${spike.source} at ${fmtInt(spike.count)} in the week of ${dayLabel(weeks[spike.at].date)}${spike.typical > 0 ? `, against a typical ${fmtTypical(spike.typical)} a week` : ", from a standing start"}.`}
+      </p>
+    </div>
+  );
+}
+
 // ─── Day × hour heatmap ───────────────────────────────────────────
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hourLabel = h => (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? " AM" : " PM");
@@ -288,6 +447,9 @@ export function ContactFormsSection({ stats, prevStats, quarter }) {
         <Sources sources={stats.sources} sourceSince={stats.sourceSince}
           sourceEligible={stats.sourceEligible} q={q} />
       </div>
+
+      <SourceTrend sources={stats.sources} sourceWeekly={stats.sourceWeekly}
+        sourceSince={stats.sourceSince} weeks={weeks} />
 
       <Heatmap heatmap={stats.heatmap} />
     </section>
