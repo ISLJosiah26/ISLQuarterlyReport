@@ -207,24 +207,59 @@ function Sources({ sources, sourceSince, sourceEligible, q }) {
 }
 
 // ─── "How they heard about us" week by week ───────────────────────
-// One mini bar chart per answer, stacked on a shared week axis: a week that
-// spikes lines up across every row, so it's obvious whether one answer moved
-// or the whole quarter did.
+// A line per answer over the quarter's weeks. Twelve answers at once is
+// spaghetti, so the legend is the control: the five biggest are drawn by
+// default and any answer can be switched in or out, up to six at a time.
 const clipLabel = s => (s.length > 30 ? s.slice(0, 29) + "…" : s);
 const fmtTypical = n => (n % 1 ? n.toFixed(1) : String(n));
 
+// Validated against paper with the skill's palette checker (light mode,
+// adjacent pairlist — the one that governs lines): worst adjacent CVD ΔE 9.4,
+// normal-vision ΔE 19.2, every hue ≥ 3:1 on the surface. Order is the
+// safety mechanism, not decoration — don't reshuffle without re-running it.
+const SOURCE_HUES = ["#0d5c9e", "#1a7a44", "#6a3d9a", "#b3541e", "#0088a3", "#a02c6d"];
+const MAX_LINES = SOURCE_HUES.length;
+const DEFAULT_LINES = 5;
+
+// Axis top as a round number in three whole steps, so the gridlines read
+// 0 / 20 / 40 / 60 rather than 0 / 29 / 59.
+function axisTop(peak) {
+  const raw = Math.max(1, peak) / 3;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / pow;
+  const step = Math.max(1, (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow);
+  return step * 3;
+}
+
 function SourceTrend({ sources, sourceWeekly, sourceSince, weeks }) {
   const [hover, setHover] = useState(null);
-  // Per-answer scaling by default: the question this panel answers is "did any
-  // one answer jump", and a shared scale hides that under the biggest answer.
-  const [ownScale, setOwnScale] = useState(true);
 
-  const { rows, max, coveredFrom } = useMemo(() => buildSourceTrend({
+  const { rows, coveredFrom } = useMemo(() => buildSourceTrend({
     sourceWeekly,
     sources,
     weekKeys: weeks.map(w => w.key),
     since: sourceSince,
   }), [sourceWeekly, sources, sourceSince, weeks]);
+
+  // source → hue index. A hue belongs to the answer that holds it until that
+  // answer is switched off, so toggling one line never repaints the others.
+  const [hues, setHues] = useState(() => new Map());
+  const defaults = rows.slice(0, DEFAULT_LINES).map(r => r.source).join("|");
+  const [seeded, setSeeded] = useState(null);
+  if (seeded !== defaults && rows.length) {
+    setSeeded(defaults);
+    setHues(new Map(rows.slice(0, DEFAULT_LINES).map((r, i) => [r.source, i])));
+  }
+
+  const toggle = source => setHues(prev => {
+    const next = new Map(prev);
+    if (next.has(source)) { next.delete(source); return next; }
+    const taken = new Set(next.values());
+    const free = SOURCE_HUES.findIndex((_, i) => !taken.has(i));
+    if (free === -1) return prev;          // at the cap — the chip is disabled
+    next.set(source, free);
+    return next;
+  });
 
   const spike = useMemo(() => findSourceSpike(rows, coveredFrom), [rows, coveredFrom]);
 
@@ -232,36 +267,33 @@ function SourceTrend({ sources, sourceWeekly, sourceSince, weeks }) {
   // before the breakdown existed has no sourceWeekly at all — stay off the page.
   if (!sourceWeekly?.length || rows.length < 2 || weeks.length - coveredFrom < 3) return null;
 
-  const W = 1100, pL = 210, pR = 52, pT = 10, pB = 30;
-  // Rows need real height: on the shared scale one big answer sets the ceiling,
-  // and at 22px everything below it collapses into a dash.
-  const rh = 32, pitch = 44;
-  const plotBottom = pT + (rows.length - 1) * pitch + rh;
-  const H = plotBottom + pB;
-  const colStep = (W - pL - pR) / weeks.length;
-  const barW = Math.min(12, colStep - 6);
-  const cx = i => pL + colStep * (i + 0.5);
-  const baseY = r => pT + r * pitch + rh;
+  const shown = rows.filter(r => hues.has(r.source));
+  const full = hues.size >= MAX_LINES;
+
+  const W = 1100, H = 320, pL = 46, pR = 26, pT = 20, pB = 34;
+  const max = axisTop(Math.max(1, ...shown.flatMap(r => r.values.slice(coveredFrom))));
+  const xStep = (W - pL - pR) / Math.max(weeks.length - 1, 1);
+  const x = i => pL + i * xStep;
+  const y = v => pT + (H - pT - pB) * (1 - v / max);
+  const ticks = [0, 1 / 3, 2 / 3, 1].map(t => ({ v: Math.round(max * t), y: y(max * t) }));
   const labelEvery = weeks.length > 10 ? Math.ceil(weeks.length / 7) : 1;
 
   const onMove = e => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * W;
-    const i = Math.floor((px - pL) / colStep);
-    setHover(i >= 0 && i < weeks.length ? i : null);
+    const i = Math.min(weeks.length - 1, Math.max(0, Math.round((px - pL) / xStep)));
+    setHover(i);
   };
 
   const hovered = hover != null
-    ? rows.map(r => ({ source: r.source, count: r.values[hover] }))
-        .filter(r => r.count > 0)
+    ? shown.map(r => ({ source: r.source, count: r.values[hover], hue: SOURCE_HUES[hues.get(r.source)] }))
         .sort((a, b) => b.count - a.count)
     : [];
 
-  // Sit the tooltip beside the hovered week rather than over it — with this
-  // many rows a centred card would cover the column being read. It flips to
-  // the near side once past the midpoint so it never leaves the panel.
+  // Sit the tooltip beside the hovered week rather than over it, flipping to
+  // the near side past the midpoint so it never leaves the panel.
   const tooltipStyle = i => {
-    const left = (cx(i) / W) * 100;
+    const left = (x(i) / W) * 100;
     return {
       left: `${left}%`,
       transform: left > 50 ? "translateX(calc(-100% - 14px))" : "translateX(14px)",
@@ -270,97 +302,104 @@ function SourceTrend({ sources, sourceWeekly, sourceSince, weeks }) {
 
   return (
     <div className="cf-panel cf-panel--wide cf-trend">
-      <div className="cf-panel-head">
-        <h3 className="cf-panel-title serif">How they heard about us, week by week</h3>
-        <div className="view-toggle" role="group" aria-label="Bar scale">
-          <button type="button" className={`toggle-btn${ownScale ? " is-active" : ""}`}
-            aria-pressed={ownScale} onClick={() => setOwnScale(true)}>Per answer</button>
-          <button type="button" className={`toggle-btn${ownScale ? "" : " is-active"}`}
-            aria-pressed={!ownScale} onClick={() => setOwnScale(false)}>Shared scale</button>
-        </div>
-      </div>
+      <h3 className="cf-panel-title serif">How they heard about us, week by week</h3>
 
-      <div className="cf-trend-scroll">
-        <div className="cf-chart-area">
-          <svg className="cf-chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
-            role="img"
-            aria-label={`Weekly count for each "how did you hear about us" answer across the quarter${spike ? `. ${spike.source} peaks at ${spike.count} in the week of ${dayLabel(weeks[spike.at].date)}` : ""}`}
-            onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      <div className="cf-chart-area">
+        <svg className="cf-chart-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label={`Weekly count for each selected "how did you hear about us" answer${spike ? `. ${spike.source} peaks at ${spike.count} in the week of ${dayLabel(weeks[spike.at].date)}` : ""}`}
+          onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
 
-            {/* Weeks before the question existed — blank by design, not by silence */}
-            {coveredFrom > 0 && (
-              <g>
-                <rect x={pL} y={pT - 4} width={colStep * coveredFrom} height={plotBottom - pT + 8}
-                  fill="var(--paper-2)" />
-                <text x={pL + (colStep * coveredFrom) / 2} y={plotBottom + 18} textAnchor="middle"
-                  fontSize="10" fill="var(--ink-4)" fontFamily="var(--sans)">not asked yet</text>
-              </g>
-            )}
+          {ticks.map((t, i) => (
+            <g key={i}>
+              <line x1={pL} x2={W - pR} y1={t.y} y2={t.y} stroke="var(--rule-soft)" strokeWidth="1" />
+              <text x={pL - 8} y={t.y + 4} textAnchor="end" fontSize="11" fill="var(--ink-4)"
+                fontFamily="var(--sans)">{t.v}</text>
+            </g>
+          ))}
+          <line x1={pL} x2={W - pR} y1={H - pB} y2={H - pB} stroke="var(--ink)" strokeWidth="1" />
 
-            {hover != null && (
-              <rect x={pL + colStep * hover} y={pT - 4} width={colStep} height={plotBottom - pT + 8}
-                fill="var(--rule-soft)" />
-            )}
-
-            {rows.map((row, r) => {
-              const scale = ownScale ? Math.max(1, row.peak) : max;
-              return (
-                <g key={row.source}>
-                  <text x={pL - 12} y={baseY(r) - 5} textAnchor="end" fontSize="12"
-                    fill="var(--ink-2)" fontFamily="var(--sans)">{clipLabel(row.source)}</text>
-                  <line x1={pL} x2={W - pR} y1={baseY(r) + 0.5} y2={baseY(r) + 0.5}
-                    stroke="var(--rule-soft)" strokeWidth="1" />
-                  {row.values.map((v, i) => {
-                    if (v <= 0 || i < coveredFrom) return null;
-                    const h = Math.max(2, (v / scale) * rh);
-                    return (
-                      <rect key={i} x={cx(i) - barW / 2} y={baseY(r) - h} width={barW} height={h}
-                        rx={Math.min(3, barW / 2)} fill={WORK}
-                        opacity={hover == null || hover === i ? 1 : 0.35} />
-                    );
-                  })}
-                  <text x={W - 4} y={baseY(r) - 5} textAnchor="end" fontSize="12"
-                    fill="var(--ink-3)" fontFamily="var(--sans)"
-                    style={{ fontVariantNumeric: "tabular-nums" }}>{fmtInt(row.total)}</text>
-                </g>
-              );
-            })}
-
-            {weeks.map((w, i) => (i % labelEvery === 0 || i === weeks.length - 1) && (
-              <text key={i} x={cx(i)} y={plotBottom + 18} textAnchor="middle" fontSize="11"
-                fill="var(--ink-3)" fontFamily="var(--sans)">{dayLabel(w.date)}</text>
-            ))}
-          </svg>
+          {/* Weeks before the question existed — blank by design, not by silence */}
+          {coveredFrom > 0 && (
+            <g>
+              <rect x={pL} y={pT} width={Math.max(0, x(coveredFrom) - xStep / 2 - pL)} height={H - pT - pB}
+                fill="var(--paper-2)" />
+              <text x={pL + 6} y={pT + 14} fontSize="10" fill="var(--ink-4)"
+                fontFamily="var(--sans)">not asked yet</text>
+            </g>
+          )}
 
           {hover != null && (
-            <div className="cf-tooltip" style={tooltipStyle(hover)}>
-              <div className="cf-tooltip-title">Week of {dayLabel(weeks[hover].date)}</div>
-              {hover < coveredFrom
-                ? <div className="cf-tooltip-row">Question not on the form yet</div>
-                : hovered.length === 0
-                  ? <div className="cf-tooltip-row">No answers</div>
-                  : hovered.map(h => (
-                      // No swatch — every row is the same hue here, so a dot
-                      // would imply a colour key that doesn't exist.
-                      <div className="cf-tooltip-row" key={h.source}>
-                        {clipLabel(h.source)} <strong>{fmtInt(h.count)}</strong>
-                      </div>
-                    ))}
-            </div>
+            <line x1={x(hover)} x2={x(hover)} y1={pT} y2={H - pB} stroke="var(--rule)" strokeWidth="1" />
           )}
-        </div>
+
+          {weeks.map((w, i) => (i % labelEvery === 0 || i === weeks.length - 1) && (
+            <text key={i} x={x(i)} y={H - pB + 18} textAnchor="middle" fontSize="11"
+              fill="var(--ink-3)" fontFamily="var(--sans)">{dayLabel(w.date)}</text>
+          ))}
+
+          {shown.map(r => {
+            const hue = SOURCE_HUES[hues.get(r.source)];
+            const pts = r.values.map((v, i) => ({ v, i })).slice(coveredFrom);
+            const path = pts.map((p, n) => `${n ? "L" : "M"}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+            const last = pts[pts.length - 1];
+            return (
+              <g key={r.source}>
+                <path d={path} fill="none" stroke={hue} strokeWidth="2" strokeLinejoin="round"
+                  strokeLinecap="round" />
+                <circle cx={x(last.i)} cy={y(last.v)} r="3.5" fill="var(--paper)" stroke={hue} strokeWidth="2" />
+                {hover != null && hover >= coveredFrom && (
+                  <circle cx={x(hover)} cy={y(r.values[hover])} r="4.5" fill="var(--paper)"
+                    stroke={hue} strokeWidth="2" />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        {hover != null && (
+          <div className="cf-tooltip" style={tooltipStyle(hover)}>
+            <div className="cf-tooltip-title">Week of {dayLabel(weeks[hover].date)}</div>
+            {hover < coveredFrom
+              ? <div className="cf-tooltip-row">Question not on the form yet</div>
+              : hovered.length === 0
+                ? <div className="cf-tooltip-row">No answers selected</div>
+                : hovered.map(h => (
+                    <div className="cf-tooltip-row" key={h.source}>
+                      <span className="cf-dot" style={{ background: h.hue }} />
+                      {clipLabel(h.source)} <strong>{fmtInt(h.count)}</strong>
+                    </div>
+                  ))}
+          </div>
+        )}
+      </div>
+
+      {/* The legend is the filter: identity never rides on colour alone, and
+          picking answers is how twelve of them fit on one chart. */}
+      <div className="cf-source-legend">
+        {rows.map(r => {
+          const on = hues.has(r.source);
+          return (
+            <button type="button" key={r.source} className="cf-source-chip"
+              aria-pressed={on} disabled={!on && full}
+              title={!on && full ? `Turn an answer off to add another — ${MAX_LINES} lines at a time` : undefined}
+              onClick={() => toggle(r.source)}>
+              <span className="cf-chip-swatch"
+                style={on ? { background: SOURCE_HUES[hues.get(r.source)] } : undefined} />
+              {r.source}
+              <span className="cf-chip-total num">{fmtInt(r.total)}</span>
+            </button>
+          );
+        })}
       </div>
 
       <p className="cf-note">
-        {ownScale
-          ? "Each answer is scaled to its own best week, so a jump in a small answer is still visible — heights don't compare between rows."
-          : "Every answer shares one scale, so bar heights compare directly from row to row. Switch to Per answer to see the shape of the quieter ones."}
+        Click an answer to add or remove its line — up to {MAX_LINES} at a time, and each answer keeps its own colour.
         {spike && ` Sharpest move: ${spike.source} at ${fmtInt(spike.count)} in the week of ${dayLabel(weeks[spike.at].date)}${spike.typical > 0 ? `, against a typical ${fmtTypical(spike.typical)} a week` : ", from a standing start"}.`}
       </p>
     </div>
   );
 }
-
 // ─── Day × hour heatmap ───────────────────────────────────────────
 const DOW_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const hourLabel = h => (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? " AM" : " PM");
