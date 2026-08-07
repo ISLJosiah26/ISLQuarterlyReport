@@ -27,6 +27,10 @@ const LABEL_GAP = 32;   // two lines of label, so they never stack on top of eac
 const LABEL_MAX = 34;
 
 const truncate = (s) => (s.length > LABEL_MAX ? s.slice(0, LABEL_MAX - 1).trimEnd() + "…" : s);
+// A page carrying a handful of sessions out of a thousand is not 0% of them.
+// Rounding says it is, and a column of "0%" labels reads as a broken chart
+// rather than as a long tail.
+const shareText = (share) => (share > 0 && share < 0.5 ? "<1%" : Math.round(share) + "%");
 const nodeText = (node) => (node.isExit || node.isOther ? node.label : stepLabel(node.label));
 const columnCaption = (d) => (d === 0 ? "Landed on" : `Then step ${d + 1}`);
 
@@ -45,17 +49,30 @@ function layout(flow) {
   for (const col of flow.columns) {
     const height = col.total * scale + NODE_GAP * (col.nodes.length - 1);
     let y = TOP + (BAND - height) / 2;
-    // A two-line label is taller than a thin node's bar, so labels are walked
-    // down the column and held apart. They stay in node order, which keeps
-    // each one next to its own bar even where a run of small pages pushes the
-    // last of them past its own.
-    let labelY = -Infinity;
+    const placed = [];
     for (const node of col.nodes) {
       const h = Math.max(MIN_NODE_H, node.value * scale);
-      labelY = Math.max(y + 11, labelY + LABEL_GAP);
-      nodes.set(node.key, { ...node, x: col.depth * step, y, h, labelY });
+      placed.push({ ...node, x: col.depth * step, y, h });
       y += h + NODE_GAP;
     }
+
+    // A two-line label is taller than a thin node's bar, so a column of small
+    // pages would stack its labels on top of each other. Walk down holding
+    // them a label apart, then walk back up pulling the overflow inside the
+    // band — without the second pass a long run of thin nodes pushes the last
+    // labels clean off the figure. They keep node order either way, so each
+    // label still reads against its own bar.
+    let labelY = -Infinity;
+    for (const node of placed) {
+      labelY = Math.max(node.y + 11, labelY + LABEL_GAP);
+      node.labelY = labelY;
+    }
+    for (let i = placed.length - 1; i >= 0; i--) {
+      const ceiling = i === placed.length - 1 ? TOP + BAND : placed[i + 1].labelY - LABEL_GAP;
+      placed[i].labelY = Math.max(TOP, Math.min(placed[i].labelY, ceiling));
+    }
+
+    for (const node of placed) nodes.set(node.key, node);
   }
 
   const links = flow.links.map(link => {
@@ -138,7 +155,7 @@ function FlowDiagram({ flow, label }) {
               {truncate(nodeText(n))}
             </text>
             <text className="cpath-node-value" x={n.x + NODE_W + 9} y={n.labelY + 15}>
-              {fmtInt(n.value)} · {Math.round(n.share)}%
+              {fmtInt(n.value)} · {shareText(n.share)}
             </text>
           </g>
         ))}
