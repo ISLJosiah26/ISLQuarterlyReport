@@ -177,6 +177,24 @@ The model is pure-function code in `src/hooks/useTrendsData.js`, covered by test
 
 ---
 
+## Post-click journeys (Paid Media view)
+
+The Paid Media view carries the click through to the site: for each campaign — and, if you'd rather report on paid traffic as a whole, for the account — an "After the click" block shows how many sessions landed, how many moved past the landing page, how deep they got, and how many converted, over a flow diagram of the traffic step by step and a table of the actual routes.
+
+One row of `paid_media_click_paths` is one journey: the ordered pages a group of sessions visited, and how many sessions took exactly that route. A journey ends where the session ended, so drop-off is a fact of the data rather than a separate figure to keep in step. Everything on the page — landing pages, the flow, the leak at each step, the ranked journeys — is derived from that (`src/lib/clickPaths.js`, tested in `clickPaths.test.js`).
+
+Enter them in **Admin → Social → Paid Media**, either per campaign or in the site-wide block underneath. Importing replaces that scope's journeys, since an export describes all of its scope's traffic and merging one in twice would double every session. Three input shapes are read:
+
+| Source | Shape |
+|---|---|
+| `GA4 → Explore → Path exploration`, exported as CSV | one column per step (`STEP +0`, `STEP +1`, …) plus a sessions column |
+| Any sheet with a route column | `Page path, Sessions, Key events` — route delimited by `>`, `->`, `→` or `\|` |
+| Rows pasted from a spreadsheet | `/warehouse-jobs > /jobs > /apply` ⇥ `120` ⇥ `8`, no header needed |
+
+Hosts, query strings and hashes are dropped (`/jobs?loc=halifax` → `/jobs`), repeated pages collapse, and end-of-session markers like `(not set)` end the route. Past 150 journeys the tail is summed into one "other" row, which counts toward the session total so shares stay honest but isn't drawn.
+
+---
+
 ## Deployment
 
 The app builds to a static bundle with no server-side requirements (`npm run build` → `dist/`). Hosting is Cloudflare Pages with `public/_redirects` handling SPA routing; any static host works. Set the two Supabase environment variables in the host's build settings.

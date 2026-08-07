@@ -1528,6 +1528,17 @@
 .admin-demo-dim-head .admin-btn-remove { margin-left: auto; }
 .admin-demo-table th:first-child, .admin-demo-table td:first-child { width: 55%; }
 
+/* Click paths editor — a paste box beside the file import, since a handful of
+   journeys is quicker to paste out of a spreadsheet than to export. */
+.admin-paste-row {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px;
+}
+.admin-textarea--paste {
+  flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  min-height: 54px; resize: vertical;
+}
+.admin-paste-row .admin-btn-secondary { white-space: nowrap; }
+
 /* All posts table */
 .admin-allposts-toolbar    { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
 .admin-posts-table-wrap    { overflow-x: auto; border: 1px solid var(--rule-soft); border-radius: var(--radius-m); }
@@ -1833,6 +1844,96 @@
   .aud-table tbody th, .aud-table tbody td,
   .aud-table tfoot th, .aud-table tfoot td { padding-right: 12px; }
   .aud-table tbody td.r, .aud-table tfoot td.r { font-size: 14px; }
+}
+
+/* ═══ Paid Media — After the click (on-site journeys) ════════════ */
+.campaign-clickpath { margin-top: 38px; }
+.cpath-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+}
+
+/* Four figures, set like the campaign KPIs but a size down — they summarize
+   the diagram below rather than competing with the campaign's headline. */
+.cpath-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  column-gap: 32px; row-gap: 26px; margin: 20px 0 30px;
+}
+.cpath-stat {
+  display: flex; flex-direction: column; gap: 7px;
+  padding-top: 11px; border-top: 1px solid var(--ink);
+  animation: fadeUp 0.4s ease both; animation-delay: calc(var(--i, 0) * 45ms);
+}
+.cpath-stat-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+.cpath-stat-value {
+  font-family: var(--serif); font-size: 27px; line-height: 1; letter-spacing: -0.01em;
+  color: var(--ink); font-variant-numeric: tabular-nums lining-nums; font-weight: 300;
+}
+.cpath-stat-note { font-size: 12px; color: var(--ink-3); }
+
+.cpath-flow { margin-bottom: 12px; }
+.cpath-svg  { display: block; width: 100%; height: auto; overflow: visible; }
+.cpath-col-caption {
+  font-family: var(--sans); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; fill: var(--ink-4); font-weight: 500;
+}
+/* Ribbons are translucent so an overlap reads as two flows crossing rather
+   than a third colour, and so the labels stay legible over them. */
+.cpath-link { fill: var(--accent); fill-opacity: 0.17; transition: fill-opacity .15s ease; }
+.cpath-link.is-exit { fill: var(--ink-4); fill-opacity: 0.2; }
+.cpath-link.is-dim  { fill-opacity: 0.05; }
+.cpath-node { cursor: default; transition: opacity .15s ease; }
+.cpath-node.is-dim { opacity: 0.34; }
+.cpath-bar { fill: var(--accent); }
+.cpath-bar.is-other { fill: var(--ink-3); }
+.cpath-bar.is-exit  { fill: var(--ink-4); }
+/* Labels sit over the ribbons, so they're painted with a paper-coloured halo
+   underneath the glyphs rather than given a background box. */
+.cpath-node-name, .cpath-node-value {
+  font-family: var(--sans); paint-order: stroke fill;
+  stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round;
+}
+.cpath-node-name  { font-size: 13px; fill: var(--ink); }
+.cpath-node-value { font-size: 11px; fill: var(--ink-3); font-variant-numeric: tabular-nums lining-nums; }
+
+.cpath-legend {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px;
+  font-size: 12px; color: var(--ink-3); margin-bottom: 26px;
+}
+.cpath-key {
+  display: inline-block; width: 22px; height: 9px; border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 30%, white); margin-right: 6px; vertical-align: -1px;
+}
+.cpath-key.is-exit { background: color-mix(in srgb, var(--ink-4) 45%, white); }
+.cpath-legend-note { color: var(--ink-4); }
+
+/* Journey rows: the whole route, wrapped rather than truncated — a route cut
+   off mid-way is exactly the information the table exists to carry. */
+.cpath-table th:first-child { width: 62%; }
+.cpath-table tbody th { text-align: left; font-weight: 400; padding-right: 20px; }
+.cpath-route { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.cpath-step {
+  font-size: 13px; color: var(--ink-2); background: var(--paper-2);
+  border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+  max-width: 30ch; overflow: hidden; text-overflow: ellipsis;
+}
+.cpath-route-sep  { color: var(--ink-4); font-size: 12px; }
+.cpath-step--end  { font-size: 11px; color: var(--ink-4); letter-spacing: 0.04em; }
+
+@media (max-width: 900px) {
+  .cpath-stats { grid-template-columns: repeat(2, 1fr); }
+}
+/* The diagram is a page-width figure — at phone widths its labels shrink past
+   legibility, so the journeys table carries the section on its own. */
+@media (max-width: 720px) {
+  .cpath-flow, .cpath-legend { display: none; }
+  .cpath-table th:first-child { width: auto; }
+  .cpath-step { font-size: 12px; max-width: 22ch; }
+}
+@media (max-width: 560px) {
+  /* Rows reflow into stacked cards here (see .table--stack). The route sits in
+     a row header rather than a cell, so it needs the same block treatment. */
+  .cpath-table.table--stack tbody th { display: block; padding: 0; border: 0; }
 }
 
 /* ═══ Admin — Submissions tab ════════════════════════════════════ */
