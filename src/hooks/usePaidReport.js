@@ -20,7 +20,7 @@ function getPrevSuffix(suffix) {
 async function fetchPaid(agency, quarter) {
   const { data, error } = await supabase
     .from("social_reports")
-    .select("id, paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*)")
+    .select("id, paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*), paid_media_click_paths(*)")
     .eq("agency", agency)
     .eq("quarter", quarter)
     .maybeSingle();
@@ -65,10 +65,34 @@ function rollUpAudience(rawRows) {
     });
 }
 
-// Demographics rows carry the campaign they describe; the ones imported before
+// A stored journey: the ordered pages one group of sessions visited after
+// landing from an ad. Rows arrive in import order (strongest first), which is
+// the order the report wants, so sort_order is the only tie-break needed.
+// `steps` is jsonb — normally parsed already, but a string is tolerated rather
+// than throwing a whole report away over one malformed row.
+function rollUpClickPaths(rawRows) {
+  return [...(rawRows || [])]
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map(r => {
+      let steps = r.steps;
+      if (typeof steps === "string") {
+        try { steps = JSON.parse(steps); } catch { steps = []; }
+      }
+      return {
+        steps: Array.isArray(steps) ? steps.filter(s => typeof s === "string" && s) : [],
+        sessions: typeof r.sessions === "number" ? r.sessions : 0,
+        conversions: typeof r.conversions === "number" ? r.conversions : null,
+        isOther: !!r.is_other,
+      };
+    })
+    .filter(p => p.sessions > 0);
+}
+
+// Breakdown rows carry the campaign they describe; the ones imported before
 // breakdowns were campaign-scoped (and any genuinely account-level export)
 // have no campaign_id and roll up as an account-wide breakdown instead.
-function splitDemographicsByCampaign(rawRows) {
+// Shared by demographics and click paths, which scope the same way.
+function splitByCampaign(rawRows) {
   const byCampaign = new Map();
   const accountWide = [];
   for (const r of rawRows || []) {
@@ -79,7 +103,7 @@ function splitDemographicsByCampaign(rawRows) {
   return { byCampaign, accountWide };
 }
 
-function mapCampaigns(rawCampaigns, demographicsByCampaign = new Map()) {
+function mapCampaigns(rawCampaigns, demographicsByCampaign = new Map(), clickPathsByCampaign = new Map()) {
   return [...(rawCampaigns || [])]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map(c => {
@@ -107,6 +131,7 @@ function mapCampaigns(rawCampaigns, demographicsByCampaign = new Map()) {
         ads,
         totals: sumPaidMediaAds(ads),
         audience: rollUpAudience(demographicsByCampaign.get(c.id)),
+        clickPaths: rollUpClickPaths(clickPathsByCampaign.get(c.id)),
       };
     });
 }
@@ -130,9 +155,11 @@ function campaignDeltas(campaigns, prevCampaigns) {
 
 function normalize(report, agency, quarter, prev) {
   const qMeta = getQuarterMeta(quarter);
-  const { byCampaign, accountWide } = splitDemographicsByCampaign(report?.paid_media_demographics);
-  const campaigns = mapCampaigns(report?.paid_media_campaigns, byCampaign);
-  const audience = rollUpAudience(accountWide);
+  const demographics = splitByCampaign(report?.paid_media_demographics);
+  const paths = splitByCampaign(report?.paid_media_click_paths);
+  const campaigns = mapCampaigns(report?.paid_media_campaigns, demographics.byCampaign, paths.byCampaign);
+  const audience = rollUpAudience(demographics.accountWide);
+  const clickPaths = rollUpClickPaths(paths.accountWide);
   const totals = sumPaidMediaAds(campaigns.flatMap(c => c.ads));
 
   campaignDeltas(campaigns, mapCampaigns(prev?.paid_media_campaigns));
@@ -150,7 +177,8 @@ function normalize(report, agency, quarter, prev) {
     totals,
     platforms,
     audience,
-    hasData: campaigns.length > 0 || audience.length > 0,
+    clickPaths,
+    hasData: campaigns.length > 0 || audience.length > 0 || clickPaths.length > 0,
   };
 }
 

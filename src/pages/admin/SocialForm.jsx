@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../../lib/supabase.js";
 import { IconClose } from "../../components/Icons.jsx";
 import { parseLinkedInDemographics, AUDIENCE_DIMENSIONS, AUDIENCE_DIMENSION_LABELS, MAX_SEGMENTS } from "../../lib/linkedinDemographics.js";
+import { parseClickPaths, parseRoute, formatRoute, MAX_PATHS } from "../../lib/clickPaths.js";
 
 const num = v => (v === "" || v === null || v === undefined) ? null : (isFinite(Number(v)) ? Number(v) : null);
 const str = v => (v == null ? "" : String(v));
@@ -166,6 +167,116 @@ function DemographicsBlock({ campaignId, rows, onImport, setDemographics, dirty,
   );
 }
 
+// ─── Click paths editor (on-site journeys after an ad click) ─────
+// One block per campaign, plus one for journeys that cover paid traffic as a
+// whole. A path export describes the whole of its scope, so importing replaces
+// that scope's rows rather than stacking on top of them — the alternative
+// double-counts every session the moment a file is imported twice.
+const newPathRow = (campaignId) => ({
+  id: crypto.randomUUID(), campaign_id: campaignId, path: "", sessions: "", conversions: "", is_other: false,
+});
+
+function ClickPathsBlock({ campaignId, rows, onImport, setClickPaths, dirty, title, hint, children }) {
+  const fileRef = useRef();
+  const [paste, setPaste] = useState("");
+  const scopeLabel = campaignId ? "this campaign" : "the site-wide breakdown";
+
+  const readFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => onImport(ev.target.result, campaignId);
+    reader.readAsText(file);
+  };
+
+  const update = (id, patch) => {
+    setClickPaths(ps => ps.map(p => (p.id === id ? { ...p, ...patch } : p)));
+    dirty();
+  };
+
+  const sessions = rows.reduce((a, r) => a + (num(r.sessions) || 0), 0);
+
+  return (
+    <div className="admin-demo-block">
+      <div className="admin-allposts-toolbar">
+        <div>
+          <h3 className="admin-demo-title">{title}</h3>
+          <div className="admin-list-hint" style={{ marginBottom: 0 }}>{hint}</div>
+        </div>
+        <div className="admin-demo-actions">
+          <input ref={fileRef} type="file" accept=".csv,.tsv,text/csv,text/plain" style={{ display: "none" }} onChange={readFile} />
+          <button className="admin-btn-secondary" onClick={() => fileRef.current?.click()}>Import journeys</button>
+          {rows.length > 0 && (
+            <button className="admin-btn-secondary" onClick={() => {
+              if (window.confirm(`Clear all journeys for ${scopeLabel}? This cannot be undone unless you save first.`)) {
+                setClickPaths(ps => ps.filter(p => (p.campaign_id || null) !== campaignId));
+                dirty();
+              }
+            }}>Clear</button>
+          )}
+          {children}
+        </div>
+      </div>
+
+      <div className="admin-paste-row">
+        <textarea
+          className="admin-textarea admin-textarea--paste"
+          rows={2}
+          value={paste}
+          onChange={e => setPaste(e.target.value)}
+          placeholder={"Paste rows: /warehouse-jobs > /jobs > /apply    120    8"}
+          aria-label="Paste journey rows"
+        />
+        <button className="admin-btn-secondary" disabled={!paste.trim()}
+          onClick={() => { if (onImport(paste, campaignId)) setPaste(""); }}>
+          Add pasted rows
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="admin-list-hint">No journeys imported yet.</div>
+      ) : (
+        <>
+          <div className="admin-posts-table-wrap">
+            <table className="admin-posts-table admin-demo-table">
+              <thead>
+                <tr><th>Journey (pages in order, separated by &gt;)</th><th className="r">Sessions</th><th className="r">Conversions</th><th /></tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.id}>
+                    <td>
+                      <input className="admin-input admin-input--cell" value={row.path}
+                        placeholder={row.is_other ? "Combined tail — no route" : "/landing > /next-page"}
+                        disabled={row.is_other}
+                        onChange={e => update(row.id, { path: e.target.value })} />
+                    </td>
+                    <td><input type="number" className="admin-input admin-input--cell r" value={row.sessions}
+                      onChange={e => update(row.id, { sessions: e.target.value })} /></td>
+                    <td><input type="number" className="admin-input admin-input--cell r" value={row.conversions}
+                      onChange={e => update(row.id, { conversions: e.target.value })} /></td>
+                    <td><button className="admin-btn-remove"
+                      onClick={() => { setClickPaths(ps => ps.filter(p => p.id !== row.id)); dirty(); }}
+                      aria-label="Remove journey"><IconClose /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="admin-list-hint" style={{ marginTop: 8 }}>
+            {rows.length} journey{rows.length === 1 ? "" : "s"} · {sessions.toLocaleString()} sessions
+          </p>
+        </>
+      )}
+      <button className="admin-btn-add"
+        onClick={() => { setClickPaths(ps => [...ps, newPathRow(campaignId)]); dirty(); }}>
+        + Add journey
+      </button>
+    </div>
+  );
+}
+
 function SaveBar({ saving, message, onSave }) {
   return (
     <div className="admin-save-bar">
@@ -208,6 +319,7 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
   const [allPosts,    setAllPosts]    = useState([]);
   const [campaigns,   setCampaigns]   = useState([]);
   const [demographics, setDemographics] = useState([]);
+  const [clickPaths, setClickPaths] = useState([]);
   const [insights,    setInsights]    = useState(BLANK_INSIGHTS);
   const [topTab,      setTopTab]      = useState("linkedin");
   const [postsAsc,    setPostsAsc]    = useState(false);
@@ -244,7 +356,7 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
       try {
         const { data, error } = await supabase
           .from("social_reports")
-          .select("id, editors_note, social_kpis(*), social_platforms(*), social_top_posts(*), social_posts(*), social_insights(*), paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*)")
+          .select("id, editors_note, social_kpis(*), social_platforms(*), social_top_posts(*), social_posts(*), social_insights(*), paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*), paid_media_click_paths(*)")
           .eq("agency", agency)
           .eq("quarter", quarter)
           .maybeSingle();
@@ -272,6 +384,13 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
               id: d.id, dimension: d.dimension, segment: d.segment || "",
               campaign_id: d.campaign_id || null, is_other: !!d.is_other,
               impressions: str(d.impressions), clicks: str(d.clicks),
+            })));
+          setClickPaths([...(data.paid_media_click_paths || [])]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map(p => ({
+              id: p.id, campaign_id: p.campaign_id || null, is_other: !!p.is_other,
+              path: formatRoute(Array.isArray(p.steps) ? p.steps : []),
+              sessions: str(p.sessions), conversions: str(p.conversions),
             })));
           const ins = data.social_insights?.[0] || {};
           setInsights({ working: ins.working || "", not_working: ins.not_working || "", actions: ins.actions || "", next_quarter: ins.next_quarter || "" });
@@ -323,13 +442,42 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
       : `Imported ${n} ${label} segment${n === 1 ? "" : "s"} ✓`);
   };
 
-  // Demographics belong to a campaign, so removing a campaign takes its
-  // breakdowns with it — matching the database's cascade, and keeping the save
-  // from inserting rows that point at a campaign that no longer exists.
+  // Import a path export into one campaign (or site-wide when campaignId is
+  // null). Returns whether anything was read, so the paste box knows to clear
+  // itself. The scope's existing journeys are replaced: an export describes
+  // all of its scope's traffic, so merging one in twice would double every
+  // session it counts.
+  const importClickPaths = (text, campaignId = null) => {
+    const parsed = parseClickPaths(text);
+    if (!parsed) {
+      flash("Error: Couldn’t read that as a list of journeys.");
+      return false;
+    }
+    setClickPaths(prev => [
+      ...prev.filter(p => (p.campaign_id || null) !== campaignId),
+      ...parsed.rows.map(r => ({
+        id: crypto.randomUUID(), campaign_id: campaignId, is_other: !!r.isOther,
+        path: formatRoute(r.steps), sessions: str(r.sessions), conversions: str(r.conversions),
+      })),
+    ]);
+    dirty();
+    const n = parsed.rows.length - (parsed.truncated ? 1 : 0);
+    flash(parsed.truncated
+      ? `Imported the top ${MAX_PATHS} journeys ✓ — the remaining ${parsed.truncated.toLocaleString()} `
+        + `(${parsed.droppedSessions.toLocaleString()} sessions) are combined into one “other” row`
+      : `Imported ${n} journey${n === 1 ? "" : "s"} ✓`);
+    return true;
+  };
+
+  // Demographics and journeys belong to a campaign, so removing a campaign
+  // takes its breakdowns with it — matching the database's cascade, and keeping
+  // the save from inserting rows that point at a campaign that no longer
+  // exists.
   const removeCampaign = (index) => {
     const removed = campaigns[index];
     setCampaigns(cs => cs.filter((_, j) => j !== index));
     setDemographics(ds => ds.filter(d => d.campaign_id !== removed.id));
+    setClickPaths(ps => ps.filter(p => p.campaign_id !== removed.id));
     dirty();
   };
 
@@ -421,6 +569,32 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
         if (demoRows.length) await dbOp(supabase.from("paid_media_demographics").insert(demoRows));
       }
 
+      // Click paths (on-site journeys). Written after the campaigns they
+      // reference, for the same reason as demographics. Rows keep their edited
+      // order, which import leaves strongest-first, so the report's "top
+      // journeys" and this table read the same way down the page.
+      await dbOp(supabase.from("paid_media_click_paths").delete().eq("report_id", rid));
+      if (clickPaths.length) {
+        const liveCampaigns = new Set(campaigns.map(c => c.id));
+        const perScope = {};
+        const pathRows = clickPaths
+          .filter(p => !p.campaign_id || liveCampaigns.has(p.campaign_id))
+          .map(p => ({ ...p, steps: p.is_other ? [] : parseRoute(p.path), sessions: num(p.sessions) }))
+          // A journey with no route and no "other" flag is an empty row the
+          // editor left behind; one with no sessions has nothing to draw.
+          .filter(p => (p.steps.length || p.is_other) && p.sessions > 0)
+          .map(p => {
+            const scope = p.campaign_id || "";
+            const order = perScope[scope] = (perScope[scope] ?? -1) + 1;
+            return {
+              report_id: rid, campaign_id: p.campaign_id || null, sort_order: order,
+              steps: p.steps, sessions: p.sessions, conversions: num(p.conversions),
+              is_other: !!p.is_other,
+            };
+          });
+        if (pathRows.length) await dbOp(supabase.from("paid_media_click_paths").insert(pathRows));
+      }
+
       // Insights
       await dbOp(supabase.from("social_insights").delete().eq("report_id", rid));
       await dbOp(supabase.from("social_insights").insert({ report_id: rid, ...insights }));
@@ -438,6 +612,7 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
   if (loadError) return <div className="admin-form-status admin-form-status--error">{loadError}</div>;
 
   const accountWideDemographics = demographics.filter(d => !d.campaign_id);
+  const siteWideClickPaths = clickPaths.filter(p => !p.campaign_id);
 
   // ── Render ──
   return (
@@ -730,12 +905,61 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
                 title="Audience"
                 hint="Who this campaign reached. Import a LinkedIn export — the breakdown (job function, seniority, industry, company…) is detected from the file."
               />
+
+              <ClickPathsBlock
+                campaignId={c.id}
+                rows={clickPaths.filter(p => p.campaign_id === c.id)}
+                onImport={importClickPaths}
+                setClickPaths={setClickPaths}
+                dirty={dirty}
+                title="After the click"
+                hint="Where this campaign's visitors went on the site. A GA4 path exploration export, or one row per journey."
+              />
             </div>
           ))}
           <button className="admin-btn-add"
             onClick={() => { setCampaigns(cs => [...cs, newCampaign()]); dirty(); }}>
             + Add campaign
           </button>
+
+          {/* Journeys that cover paid traffic as a whole rather than one
+              campaign — the usual shape of a GA4 export, since a path
+              exploration is filtered by traffic source rather than by ad.
+              Always offered, since there's no other way to enter them. */}
+          <ClickPathsBlock
+            campaignId={null}
+            rows={siteWideClickPaths}
+            onImport={importClickPaths}
+            setClickPaths={setClickPaths}
+            dirty={dirty}
+            title="After the click — site-wide"
+            hint="Journeys for paid traffic generally, not one campaign. Shown in their own section at the foot of the report."
+          >
+            {campaigns.length > 0 && (
+              <select
+                className="admin-input admin-demo-move"
+                value=""
+                aria-label="Move site-wide journeys to a campaign"
+                onChange={e => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  setClickPaths(ps => ps.map(p => (p.campaign_id ? p : { ...p, campaign_id: id })));
+                  dirty();
+                }}>
+                <option value="">Move to campaign…</option>
+                {campaigns.map((c, i) => (
+                  <option key={c.id} value={c.id}>{c.name || `Campaign ${i + 1}`}</option>
+                ))}
+              </select>
+            )}
+          </ClickPathsBlock>
+
+          <p className="admin-csv-hint">
+            Journeys come from <code>GA4 → Explore → Path exploration</code> (start from the landing page,
+            filtered to the paid traffic), exported as CSV — or any list of{" "}
+            <code>route, sessions, conversions</code> rows, where a route is its pages in order:{" "}
+            <code>/warehouse-jobs &gt; /jobs &gt; /apply</code>. A journey ends where the session ended.
+          </p>
 
           <p className="admin-csv-hint">
             Audience files come from either <code>Campaign Manager → Analyze → Demographics → Export</code>

@@ -7,6 +7,7 @@ import { EmptyData } from "../components/EmptyState.jsx";
 import { fmt, fmtExact, adSpend } from "../utils.js";
 import { CountUp } from "../components/CountUp.jsx";
 import { SectionRail } from "../components/SectionRail.jsx";
+import { ClickPathBlock } from "../components/ClickPathFlow.jsx";
 
 // ─── Formatters ───────────────────────────────────────────────────
 const money0 = v => (v != null ? "$" + fmt(v) : "—");
@@ -544,6 +545,16 @@ function Campaign({ c, index, open, onToggle }) {
               </div>
             )}
 
+            {/* The ads table ends at the click; this picks the same visitor up
+                on the other side of it. */}
+            {c.clickPaths.length > 0 && (
+              <ClickPathBlock
+                paths={c.clickPaths}
+                title="Where the clicks went"
+                note="On-site journey after the ad"
+              />
+            )}
+
             {c.audience.length > 0 && (
               <AudienceBlock panels={c.audience} title="Who this campaign reached" />
             )}
@@ -610,6 +621,9 @@ export function PaidPage({ agency, quarter, onReady }) {
   // Demographics imported before breakdowns were campaign-scoped have no
   // campaign to sit under, so they keep their own section at the foot.
   const showAccountAudience = data.audience.length > 0;
+  // Same for journeys: an export covering paid traffic as a whole, rather than
+  // one campaign, belongs to the account and not to any campaign above.
+  const showAccountPaths = data.clickPaths.length > 0;
 
   const defaultOpen = hasCampaigns ? [campaigns[0].id] : [];
   const open = openIds ?? defaultOpen;
@@ -622,6 +636,7 @@ export function PaidPage({ agency, quarter, onReady }) {
 
   const sections = [
     ...campaigns.map((c, i) => ({ id: `campaign-${i}`, label: railLabel(c.name, i) })),
+    ...(showAccountPaths ? [{ id: "click-paths", label: "After the Click" }] : []),
     ...(showAccountAudience ? [{ id: "audience", label: "Who We Reached" }] : []),
   ];
 
@@ -657,6 +672,20 @@ export function PaidPage({ agency, quarter, onReady }) {
                     />
                   ))}
                 </div>
+              </section>
+            </ErrorBoundary>
+          )}
+          {showAccountPaths && (
+            <ErrorBoundary>
+              <section id="click-paths" className="section wrap">
+                <header className="section-head">
+                  <h2 className="section-title serif">After the <em>Click</em></h2>
+                </header>
+                <ClickPathBlock
+                  paths={data.clickPaths}
+                  title="Across all campaigns"
+                  note="On-site journey after the ad"
+                />
               </section>
             </ErrorBoundary>
           )}
