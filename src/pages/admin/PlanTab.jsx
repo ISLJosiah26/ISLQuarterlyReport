@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase.js";
-import { QUARTERS } from "../../config.js";
+import { QUARTERS, resolveQuarter } from "../../config.js";
 import { WeekCalendar } from "./WeekCalendar.jsx";
 import { useWebReport } from "../../hooks/useWebReport.js";
 import { buildPlanSuggestion, buildWeekPlan, buildCadence } from "../../lib/planEngine.js";
@@ -84,13 +84,14 @@ export function PlanTab({ agency, quarter }) {
     setLoadError("");
     (async () => {
       try {
-        const quarters = prevQ ? [quarter, prevQ.suffix] : [quarter];
+        // (quarter, year) pairs — a bare suffix repeats every fiscal year.
+        const wanted = prevQ ? [resolveQuarter(quarter), prevQ] : [resolveQuarter(quarter)];
         const [reportsRes, plannedRes] = await Promise.all([
           supabase
             .from("social_reports")
-            .select("quarter, social_posts(*), social_platforms(*), paid_media_campaigns(*, paid_media_ads(*))")
+            .select("quarter, year, social_posts(*), social_platforms(*), paid_media_campaigns(*, paid_media_ads(*))")
             .eq("agency", agency)
-            .in("quarter", quarters),
+            .or(wanted.map(q => `and(quarter.eq.${q.suffix},year.eq.${q.year})`).join(",")),
           supabase
             .from("plan_items")
             .select("content_type, planned_date, idea, status")
@@ -101,9 +102,10 @@ export function PlanTab({ agency, quarter }) {
         if (reportsRes.error) throw reportsRes.error;
         if (!cancelled) {
           const byQuarter = {};
-          for (const r of reportsRes.data || []) byQuarter[r.quarter] = r;
-          const cur = byQuarter[quarter] || {};
-          const prev = prevQ ? byQuarter[prevQ.suffix] || {} : {};
+          for (const r of reportsRes.data || []) byQuarter[`${r.quarter}-${r.year}`] = r;
+          const curQ = resolveQuarter(quarter);
+          const cur = byQuarter[`${curQ.suffix}-${curQ.year}`] || {};
+          const prev = prevQ ? byQuarter[`${prevQ.suffix}-${prevQ.year}`] || {} : {};
           setCurrentPosts(cur.social_posts || []);
           setPrevPosts(prev.social_posts || []);
           setCurrentPlatforms(cur.social_platforms || []);

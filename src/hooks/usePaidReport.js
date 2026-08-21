@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase.js";
-import { AGENCIES, QUARTERS } from "../config.js";
+import { AGENCIES, QUARTERS, resolveQuarter } from "../config.js";
 import { calcAutoDelta, sumPaidMediaAds, nfk } from "../utils.js";
 import { withRetry, friendlyError, getCached, setCached } from "../lib/fetching.js";
 import { AUDIENCE_DIMENSIONS, compareSegments } from "../lib/linkedinDemographics.js";
@@ -18,11 +18,13 @@ function getPrevSuffix(suffix) {
 // agency+quarter), so the paid page fetches the same parent but selects only
 // the campaign/ad branch it needs.
 async function fetchPaid(agency, quarter) {
+  const q = resolveQuarter(quarter);
   const { data, error } = await supabase
     .from("social_reports")
     .select("id, paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*), paid_media_click_paths(*)")
     .eq("agency", agency)
-    .eq("quarter", quarter)
+    .eq("quarter", q.suffix)
+    .eq("year", q.year)
     .maybeSingle();
   if (error) throw error;
   return data;
