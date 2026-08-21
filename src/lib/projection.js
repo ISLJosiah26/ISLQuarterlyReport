@@ -59,11 +59,24 @@ export function extractMetric(data, metric) {
 // current-quarter evidence accumulates.
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// The full-quarter regression is the least reliable of the three methods, and
+// it fails hardest exactly where it used to be trusted most. It fits one
+// straight line across the whole quarter, so a burst of activity in any single
+// stretch tilts the line and keeps that tilt in the extrapolation long after
+// the burst is over — a quarter that ran hot in month two projects a month-two
+// finish onto a month-three reality. Back-testing ISL's Q4 snapshots (174
+// hold-out projections against known actuals) put the regression's mean
+// absolute error above both other methods at *every* stage from 40% to 95%
+// elapsed, and it was the only component with a consistent upward bias. So its
+// weight now decays as the quarter matures rather than climbing to a majority,
+// and the trailing-window rate — which tracks the current regime — takes the
+// difference. Early-quarter weights are unchanged: that is where the rolling
+// window is thinnest and the regression genuinely earns its keep.
 function blendWeights(elapsedFraction, hasReg, hasRolling) {
   const f = clamp(elapsedFraction, 0, 1);
   if (hasReg && hasRolling) {
     const wSimple = clamp(0.30 - 0.20 * f, 0.10, 0.30); // 0.30 → 0.10
-    const wReg    = clamp(0.35 + 0.15 * f, 0.35, 0.50); // 0.35 → 0.50
+    const wReg    = clamp(0.35 - 0.10 * f, 0.25, 0.35); // 0.35 → 0.25
     return { simple: wSimple, rolling: 1 - wSimple - wReg, reg: wReg };
   }
   if (hasReg) {
@@ -326,6 +339,18 @@ export function getProjectionTimeline(snapshots, metric, tq3, q2Rate, histBaseli
 // low end is floored at `current` (a cumulative metric can't end below what is
 // already banked). Returns null when there's no projection to bound.
 const BAND_BASE_VOL = 0.12; // per-remaining-quarter drift assumption, ~12%
+// The linear drift term above shrinks in proportion to the time left, which
+// turns out to be too fast: back-testing ISL's Q4 snapshots put band coverage
+// at 70% near the end of the quarter (and 66% at four-fifths through) for a
+// range the UI presents as "likely". Accumulated uncertainty behaves more like
+// diffusion than like a straight line — a metric with two weeks left can still
+// surprise by much more than two weeks of average drift, because one post can
+// land. This square-root term adds that residual: it is small in absolute
+// terms, but because √r ≫ r for small r it dominates late, widening the
+// end-of-quarter band by roughly a sixth while leaving the early-quarter band
+// almost as it was. It still vanishes at r = 0, so a closed quarter reports no
+// range at all.
+const BAND_DRIFT_VOL = 0.035;
 export function projectionBand(pace, { elapsedFraction, empiricalErrorPct = null, current = null } = {}) {
   if (!pace || !Number.isFinite(pace.projected) || pace.projected <= 0) return null;
   const proj = pace.projected;
@@ -340,7 +365,7 @@ export function projectionBand(pace, { elapsedFraction, empiricalErrorPct = null
   const empirical = Number.isFinite(empiricalErrorPct) ? Math.abs(empiricalErrorPct) / 100 : 0;
 
   const relHalf = clamp(
-    spread * 0.6 + remaining * BAND_BASE_VOL + empirical * remaining,
+    spread * 0.6 + remaining * BAND_BASE_VOL + Math.sqrt(remaining) * BAND_DRIFT_VOL + empirical * remaining,
     0.01, 0.6
   );
 

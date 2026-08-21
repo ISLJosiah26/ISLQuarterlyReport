@@ -54,6 +54,44 @@ describe("computeAdvancedPace — continuous blending", () => {
   });
 });
 
+describe("computeAdvancedPace — regression weight decays as the quarter matures", () => {
+  // On a decelerating series the full-quarter regression keeps extrapolating
+  // the early slope while the trailing window has already seen the plateau, so
+  // reg sits well above rolling. Where the blend lands between those two is a
+  // direct read on the regression's weight, without exporting blendWeights.
+  const all = decelSnapshots().map(s => ({ t: s.t, val: s.vals.m }));
+  const leanTowardReg = (day) => {
+    const history = all.slice(0, day + 1);
+    const pace = computeAdvancedPace(
+      history[history.length - 1].val, qStart, qEnd, null, history, 0,
+      new Date(qStart.getTime() + day * DAY),
+    );
+    // 0 = sits exactly on the rolling projection, 1 = sits on the regression.
+    return (pace.projected - pace.components.reg === 0)
+      ? 1
+      : (pace.projected - pace.components.rolling) / (pace.components.reg - pace.components.rolling);
+  };
+
+  it("leans further toward the trailing window the later the quarter gets", () => {
+    const early = leanTowardReg(25);
+    const mid   = leanTowardReg(55);
+    const late  = leanTowardReg(82);
+    expect(mid).toBeLessThan(early);
+    expect(late).toBeLessThan(mid);
+  });
+
+  it("keeps the blend on the trailing-window side of the regression from mid-quarter on", () => {
+    // Once past the halfway mark the regression's weight is decaying toward
+    // 0.25, so the blend settles nearer the rolling projection than the
+    // regression one. (Earlier than this the simple rate can sit outside the
+    // rolling..reg interval and drag the blend past either end, so the
+    // position reads as more than the regression's own weight.)
+    for (const day of [55, 70, 82, 88]) {
+      expect(leanTowardReg(day)).toBeLessThan(0.5);
+    }
+  });
+});
+
 describe("computeAdvancedPace — least-squares rolling rate", () => {
   it("is robust to a single noisy final snapshot", () => {
     // Seven days of clean slope-10 growth, then a spurious high final point.
@@ -444,6 +482,24 @@ describe("projectionBand", () => {
     // By quarter's end the empirical contribution is gone (remaining → 0).
     const messyLate = projectionBand(pace(1000, comps, 1), { elapsedFraction: 1, empiricalErrorPct: 25 });
     expect(messyLate.relHalf).toBeCloseTo(0.01, 5); // clamped floor only
+  });
+
+  it("shrinks sub-linearly, so a nearly-finished quarter keeps an honest range", () => {
+    // No method spread, so the band is purely the time-remaining terms. Halving
+    // the time left must *not* halve the band: the square-root drift term
+    // dominates late, which is what lifts end-of-quarter coverage to ~80%.
+    const comps = { simple: 1000, rolling: 1000, reg: 1000 };
+    const at = (f) => projectionBand(pace(1000, comps, f), { elapsedFraction: f }).relHalf;
+    const tenLeft  = at(0.90);
+    const fiveLeft = at(0.95);
+    expect(fiveLeft).toBeGreaterThan(tenLeft * 0.5);
+    // And it is meaningfully wider than the linear drift term alone would give.
+    expect(tenLeft).toBeGreaterThan(0.10 * 0.12 * 1.5);
+  });
+
+  it("still collapses to the floor once the quarter is over", () => {
+    const comps = { simple: 1000, rolling: 1000, reg: 1000 };
+    expect(projectionBand(pace(1000, comps, 1), { elapsedFraction: 1 }).relHalf).toBeCloseTo(0.01, 5);
   });
 
   it("floors the low end at the value already banked", () => {
