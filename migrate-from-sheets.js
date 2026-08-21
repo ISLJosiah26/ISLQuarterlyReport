@@ -23,6 +23,13 @@ const WEB_ENDPOINT    = "https://script.google.com/macros/s/AKfycbwWpZWB_eP48AX_
 const AGENCIES = { isl: "isl", as: "as", ads: "ads" };
 const QUARTERS = ["q1", "q2", "q3", "q4"];
 
+// social_reports is keyed (agency, quarter, year). This script imports the
+// one fiscal year that lived in the Sheets export — Sep 2025 through Aug 2026
+// — so the year label is fixed per quarter rather than derived: the fiscal
+// year opens with q1 in Sep-Nov 2025 and the rest close in 2026. Re-pointing
+// this at a later export means updating this map.
+const QUARTER_YEARS = { q1: "2025", q2: "2026", q3: "2026", q4: "2026" };
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -140,7 +147,10 @@ async function migrateSocial(agency, quarter) {
   // ── Insert into Supabase ──
   const { data: rep, error: e1 } = await supabase
     .from("social_reports")
-    .upsert({ agency, quarter, editors_note: editorsNote }, { onConflict: "agency,quarter" })
+    .upsert(
+      { agency, quarter, year: QUARTER_YEARS[quarter], editors_note: editorsNote },
+      { onConflict: "agency,quarter,year" },
+    )
     .select("id").single();
   if (e1) { console.error(`    report upsert failed:`, e1.message); return; }
   const rid = rep.id;

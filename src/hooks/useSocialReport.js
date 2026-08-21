@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase.js";
-import { AGENCIES, QUARTERS } from "../config.js";
+import { AGENCIES, QUARTERS, resolveQuarter } from "../config.js";
 import { calcAutoDelta, FLAT } from "../utils.js";
 import { withRetry, friendlyError, getCached, setCached } from "../lib/fetching.js";
 
@@ -14,6 +14,7 @@ function getPrevSuffix(suffix) {
 }
 
 async function fetchReport(agency, quarter) {
+  const q = resolveQuarter(quarter);
   const { data, error } = await supabase
     .from("social_reports")
     .select(`
@@ -25,7 +26,8 @@ async function fetchReport(agency, quarter) {
       social_insights(*)
     `)
     .eq("agency", agency)
-    .eq("quarter", quarter)
+    .eq("quarter", q.suffix)
+    .eq("year", q.year)
     .maybeSingle();
   if (error) throw error;
   return data;

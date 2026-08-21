@@ -25,21 +25,21 @@ export function useSocialKpiHistory(agency) {
       try {
         const { data, error } = await supabase
           .from("social_reports")
-          .select("quarter, social_kpis(*)")
+          .select("quarter, year, social_kpis(*)")
           .eq("agency", agency)
-          .in("quarter", QUARTERS.map(q => q.suffix));
+          .or(QUARTERS.map(q => `and(quarter.eq.${q.suffix},year.eq.${q.year})`).join(","));
         if (error) throw error;
         if (!cancelled) {
           const byQuarter = {};
           (data || []).forEach(r => {
-            byQuarter[r.quarter] = mapKpis(r.social_kpis?.[0] || null);
+            byQuarter[`${r.quarter}-${r.year}`] = mapKpis(r.social_kpis?.[0] || null);
           });
           // Oldest-first for the chart (QUARTERS is most-recent-first)
           const result = [...QUARTERS].reverse().map(q => ({
             suffix: q.suffix,
             label: q.label,
             rangeLabel: q.rangeLabel,
-            kpis: byQuarter[q.suffix] || null,
+            kpis: byQuarter[`${q.suffix}-${q.year}`] || null,
           }));
           setHistory(result);
         }

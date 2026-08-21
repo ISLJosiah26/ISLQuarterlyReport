@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "../../lib/supabase.js";
+import { resolveQuarter } from "../../config.js";
 import { IconClose } from "../../components/Icons.jsx";
 import { parseLinkedInDemographics, AUDIENCE_DIMENSIONS, AUDIENCE_DIMENSION_LABELS, MAX_SEGMENTS } from "../../lib/linkedinDemographics.js";
 import { parseClickPaths, parseRoute, formatRoute, MAX_PATHS } from "../../lib/clickPaths.js";
@@ -358,7 +359,8 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
           .from("social_reports")
           .select("id, editors_note, social_kpis(*), social_platforms(*), social_top_posts(*), social_posts(*), social_insights(*), paid_media_campaigns(*, paid_media_ads(*)), paid_media_demographics(*), paid_media_click_paths(*)")
           .eq("agency", agency)
-          .eq("quarter", quarter)
+          .eq("quarter", resolveQuarter(quarter).suffix)
+          .eq("year", resolveQuarter(quarter).year)
           .maybeSingle();
         if (error) throw error;
         if (data) {
@@ -486,9 +488,15 @@ export function SocialForm({ agency, quarter, onDirtyChange }) {
     setSaveMsg("");
     try {
       // Upsert report row
+      // Keyed on (agency, quarter, year): without the year this upsert would
+      // overwrite the same-suffix quarter from the previous fiscal year, and
+      // the social_kpis delete-and-reinsert below would take its KPIs with it.
       const { data: rep, error: e1 } = await supabase
         .from("social_reports")
-        .upsert({ agency, quarter, editors_note: editorsNote }, { onConflict: "agency,quarter" })
+        .upsert(
+          { agency, quarter: resolveQuarter(quarter).suffix, year: resolveQuarter(quarter).year, editors_note: editorsNote },
+          { onConflict: "agency,quarter,year" },
+        )
         .select("id").single();
       if (e1) throw e1;
       const rid = rep.id;

@@ -82,3 +82,18 @@ export const QUARTERS = recentQuarters(4);
 
 // Trends analysis — oldest-first ([0]=two-ago, [1]=previous, [2]=current)
 export const TRENDS_QUARTERS = recentQuarters(3).reverse();
+
+// A quarter suffix on its own ("q1") does not identify a quarter — it repeats
+// every year, and the database now keys on (quarter, year). Suffixes stay
+// unambiguous *within* the navigable window, so the URL can keep carrying just
+// the suffix; every query resolves it to a full quarter here first. Falls back
+// to the current quarter for an unrecognised suffix, matching how useUrlState
+// and main.jsx already treat one.
+export function resolveQuarter(suffix) {
+  return QUARTERS.find(q => q.suffix === suffix) || CURRENT_QUARTER;
+}
+
+// Year label for a quarter suffix, for queries that need nothing else.
+export function quarterYear(suffix) {
+  return resolveQuarter(suffix).year;
+}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase.js";
-import { TRENDS_QUARTERS, CURRENT_QUARTER, AGENCIES } from "../config.js";
-import { METRICS, extractMetric, buildProjectionAudits } from "../lib/projection.js";
+import { TRENDS_QUARTERS, AGENCIES } from "../config.js";
+import { METRICS, buildProjectionAudits } from "../lib/projection.js";
 import { withRetry, friendlyError } from "../lib/fetching.js";
 
 // Re-export the pure projection math so existing consumers (TrendsPage,
@@ -30,31 +30,20 @@ export {
 } from "../lib/projection.js";
 
 // ─── History: Supabase persistence ───────────────────────────────
-async function storeSnapshot(agency, d3) {
-  if (!d3) return;
-  const vals = {};
-  for (const m of METRICS) {
-    if (!m.isPace) continue;
-    const v = extractMetric(d3, m);
-    if (v !== null) vals[m.id] = v;
-  }
-  if (!Object.keys(vals).length) return;
-  const today = new Date().toISOString().slice(0, 10);
-  try {
-    await supabase.from("projection_snapshots").upsert(
-      { agency, quarter: CURRENT_QUARTER.suffix, snapshot_date: today, captured_at: new Date().toISOString(), vals },
-      { onConflict: "agency,quarter,snapshot_date" }
-    );
-  } catch (_) {}
-}
+// Writing snapshots is the capture-projection-snapshots cron job's business
+// now, not the browser's. Page-load capture made snapshot density depend on
+// who happened to open the Trends tab, which left weekend gaps, a five-day
+// hole in early August, and two agencies silently stale for weeks — and every
+// projection is only as good as that series is dense.
 
-async function loadSnapshots(agency, quarterSuffix) {
+async function loadSnapshots(agency, quarter) {
   try {
     const { data, error } = await supabase
       .from("projection_snapshots")
       .select("captured_at, vals")
       .eq("agency", agency)
-      .eq("quarter", quarterSuffix)
+      .eq("quarter", quarter.suffix)
+      .eq("year", quarter.year)
       .order("snapshot_date", { ascending: true });
     if (error || !data) return [];
     return data.map(row => ({ t: new Date(row.captured_at).getTime(), vals: row.vals }));
@@ -98,15 +87,17 @@ async function storeAudits(agency, qdata, snapsByQuarter) {
   } catch (_) {}
 }
 
-// Fire-and-forget audit persistence for every agency's current quarter,
-// mirroring snapshotAllAgencies below: the Trends page is the only place
-// this runs, so an agency nobody views would otherwise never accrue audit
-// history.
+// Fire-and-forget audit persistence for every agency, not just the one being
+// viewed: the Trends page is the only place this runs, so an agency nobody
+// opens would otherwise never accrue audit history. Unlike the snapshot
+// capture this stays on the client, because the audit is stage-matched — it
+// recalibrates against how the model behaved at the point in the quarter you
+// are reading it at, so recomputing on load is the point, not a side effect.
 async function auditAllAgencies() {
   await Promise.all(
     Object.keys(AGENCIES).map(async (a) => {
-      const qdata = await Promise.all(TRENDS_QUARTERS.map(q => fetchQuarter(a, q.suffix)));
-      const snaps = await loadSnapshots(a, TRENDS_QUARTERS[1].suffix);
+      const qdata = await Promise.all(TRENDS_QUARTERS.map(q => fetchQuarter(a, q)));
+      const snaps = await loadSnapshots(a, TRENDS_QUARTERS[1]);
       await storeAudits(a, qdata, { [TRENDS_QUARTERS[1].suffix]: snaps });
     })
   );
@@ -132,16 +123,16 @@ async function loadCalibrationHistory(agency, metricId, limit = 4) {
 
 // Top post and platform leader/laggard for the viewed agency's current
 // quarter, to auto-surface "what's driving this" without anyone having to
-// curate it. Scoped to the single viewed agency (unlike snapshotAllAgencies/
-// auditAllAgencies above) since this only feeds a display widget, not an
-// accumulating history.
-async function fetchDrivers(agency, quarterSuffix) {
+// curate it. Scoped to the single viewed agency (unlike auditAllAgencies
+// above) since this only feeds a display widget, not an accumulating history.
+async function fetchDrivers(agency, quarter) {
   try {
     const { data, error } = await supabase
       .from("social_reports")
       .select("social_posts(post_name, post_date, platforms, impressions, engagements, url), social_platforms(name, engagement_rate)")
       .eq("agency", agency)
-      .eq("quarter", quarterSuffix)
+      .eq("quarter", quarter.suffix)
+      .eq("year", quarter.year)
       .maybeSingle();
     if (error || !data) return { topPost: null, platformLeader: null, platformLaggard: null, posts: [] };
 
@@ -174,19 +165,22 @@ async function fetchDrivers(agency, quarterSuffix) {
 function relDelta(cur, prev) {
   return Number.isFinite(cur) && Number.isFinite(prev) && prev > 0 ? (cur - prev) / prev * 100 : null;
 }
-async function fetchPlatformBreakdown(agency, currentSuffix, prevSuffix) {
+async function fetchPlatformBreakdown(agency, current, prev) {
   try {
+    // (quarter, year) pairs, so a suffix that repeats across years cannot
+    // pull the wrong row in.
     const { data, error } = await supabase
       .from("social_reports")
-      .select("quarter, social_platforms(name, sort_order, followers, engagement_rate, page_reach, page_clicks)")
+      .select("quarter, year, social_platforms(name, sort_order, followers, engagement_rate, page_reach, page_clicks)")
       .eq("agency", agency)
-      .in("quarter", [currentSuffix, prevSuffix]);
+      .or(`and(quarter.eq.${current.suffix},year.eq.${current.year}),and(quarter.eq.${prev.suffix},year.eq.${prev.year})`);
     if (error || !data) return [];
+    const key = (q) => `${q.suffix}-${q.year}`;
     const byQuarter = {};
-    for (const r of data) byQuarter[r.quarter] = r.social_platforms || [];
-    const cur = byQuarter[currentSuffix] || [];
+    for (const r of data) byQuarter[`${r.quarter}-${r.year}`] = r.social_platforms || [];
+    const cur = byQuarter[key(current)] || [];
     const prevByName = {};
-    for (const p of (byQuarter[prevSuffix] || [])) prevByName[(p.name || "").toLowerCase()] = p;
+    for (const p of (byQuarter[key(prev)] || [])) prevByName[(p.name || "").toLowerCase()] = p;
 
     return [...cur]
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -214,7 +208,8 @@ async function fetchQuarter(agency, quarter) {
       .from("social_reports")
       .select("social_kpis(*)")
       .eq("agency", agency)
-      .eq("quarter", quarter)
+      .eq("quarter", quarter.suffix)
+      .eq("year", quarter.year)
       .maybeSingle());
     if (error) throw error;
     if (!data) return null;
@@ -235,19 +230,6 @@ async function fetchQuarter(agency, quarter) {
   }
 }
 
-// Write today's snapshot for *every* agency's current quarter, not just the
-// one being viewed. Snapshots are only ever recorded from this page, so an
-// agency whose Trends tab nobody opens would otherwise build no projection
-// history. Fire-and-forget: fetchQuarter/storeSnapshot swallow their own
-// errors, and agencies with no current-quarter data are skipped.
-async function snapshotAllAgencies() {
-  await Promise.all(
-    Object.keys(AGENCIES).map((a) =>
-      fetchQuarter(a, CURRENT_QUARTER.suffix).then((d) => storeSnapshot(a, d))
-    )
-  );
-}
-
 export function useTrendsData(agency) {
   const [state, setState] = useState({ qdata: null, snapsByQuarter: {}, calibrationHistory: {}, drivers: null, platforms: [], status: "loading", error: null });
 
@@ -257,10 +239,10 @@ export function useTrendsData(agency) {
     const run = async () => {
       try {
         const [qdata, drivers, platforms, ...rest] = await Promise.all([
-          Promise.all(TRENDS_QUARTERS.map(q => fetchQuarter(agency, q.suffix))),
-          fetchDrivers(agency, TRENDS_QUARTERS[2].suffix),
-          fetchPlatformBreakdown(agency, TRENDS_QUARTERS[2].suffix, TRENDS_QUARTERS[1].suffix),
-          ...TRENDS_QUARTERS.map(q => loadSnapshots(agency, q.suffix)),
+          Promise.all(TRENDS_QUARTERS.map(q => fetchQuarter(agency, q))),
+          fetchDrivers(agency, TRENDS_QUARTERS[2]),
+          fetchPlatformBreakdown(agency, TRENDS_QUARTERS[2], TRENDS_QUARTERS[1]),
+          ...TRENDS_QUARTERS.map(q => loadSnapshots(agency, q)),
           ...METRICS.map(m => loadCalibrationHistory(agency, m.id)),
         ]);
         const snapsArrays = rest.slice(0, TRENDS_QUARTERS.length);
@@ -273,11 +255,10 @@ export function useTrendsData(agency) {
           const calibrationHistory = Object.fromEntries(
             METRICS.map((m, i) => [m.id, historyArrays[i]])
           );
-          // Fire-and-forget: snapshot every agency's current quarter, and
-          // persist an audit of last quarter's projection accuracy for every
-          // agency, not just the one being viewed — so each one accrues
-          // history regardless of whose Trends tab gets opened.
-          snapshotAllAgencies();
+          // Fire-and-forget: persist an audit of last quarter's projection
+          // accuracy for every agency, not just the one being viewed, so each
+          // one accrues history regardless of whose Trends tab gets opened.
+          // (Snapshot capture is the cron job's job now, not this page's.)
           auditAllAgencies();
           setState({ qdata, snapsByQuarter, calibrationHistory, drivers, platforms, status: "ready", error: null });
         }

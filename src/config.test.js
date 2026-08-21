@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quarterForMonthYear, QUARTERS, TRENDS_QUARTERS, CURRENT_QUARTER } from "./config.js";
+import { quarterForMonthYear, QUARTERS, TRENDS_QUARTERS, CURRENT_QUARTER, resolveQuarter, quarterYear } from "./config.js";
 
 describe("quarterForMonthYear (fiscal year starts September)", () => {
   it("maps months to the right fiscal quarter", () => {
@@ -38,5 +38,35 @@ describe("derived quarter lists", () => {
     expect(TRENDS_QUARTERS).toHaveLength(3);
     expect(TRENDS_QUARTERS[2].suffix).toBe(CURRENT_QUARTER.suffix);
     expect(TRENDS_QUARTERS[0].start.getTime()).toBeLessThan(TRENDS_QUARTERS[2].start.getTime());
+  });
+});
+
+describe("resolveQuarter", () => {
+  it("resolves every navigable suffix to that exact quarter", () => {
+    for (const q of QUARTERS) {
+      expect(resolveQuarter(q.suffix)).toBe(q);
+      expect(quarterYear(q.suffix)).toBe(q.year);
+    }
+  });
+
+  it("falls back to the current quarter for an unknown suffix", () => {
+    expect(resolveQuarter("q9")).toBe(CURRENT_QUARTER);
+    expect(resolveQuarter(undefined)).toBe(CURRENT_QUARTER);
+  });
+
+  it("gives the same suffix different years across a fiscal-year boundary", () => {
+    // The whole reason the year exists: q1 in the nav window and the q1 that
+    // comes round next September are different quarters, and the database
+    // must be able to hold both.
+    const thisQ1 = quarterForMonthYear(9, 2025);  // Oct 2025 -> q1 2025
+    const nextQ1 = quarterForMonthYear(9, 2026);  // Oct 2026 -> q1 2026
+    expect(thisQ1.suffix).toBe(nextQ1.suffix);
+    expect(thisQ1.year).not.toBe(nextQ1.year);
+  });
+
+  it("labels a December quarter with the year it ends in", () => {
+    // q2 spans Dec-Feb, so a December date belongs to the next year's label —
+    // the one case the SQL backfill has to special-case too.
+    expect(quarterForMonthYear(11, 2025).year).toBe("2026");
   });
 });
